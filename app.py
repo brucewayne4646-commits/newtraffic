@@ -63,15 +63,28 @@ def simulation_worker_loop():
             time.sleep(0.5)
 
 
-# Start background worker thread
-sim_thread = threading.Thread(target=simulation_worker_loop, daemon=True)
-sim_thread.start()
+# Check if running in a Serverless environment (Vercel, AWS Lambda)
+IS_SERVERLESS = (
+    os.environ.get("VERCEL") == "1"
+    or "VERCEL_ENV" in os.environ
+    or "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+    or "LAMBDA_TASK_ROOT" in os.environ
+)
+
+# Start background worker thread ONLY when NOT in serverless
+if not IS_SERVERLESS:
+    sim_thread = threading.Thread(target=simulation_worker_loop, daemon=True)
+    sim_thread.start()
+else:
+    sim_thread = None
 
 
 @app.route('/')
 @app.route('/api/index')
 def index():
-    return render_template('index.html')
+    with sim_lock:
+        initial_state = engine.get_full_state()
+    return render_template('index.html', initial_state=initial_state)
 
 
 @app.route('/static/<path:filename>')
@@ -121,7 +134,7 @@ def get_state():
     with sim_lock:
         # In serverless environments (like Vercel) where background threads cannot run continuously,
         # advance simulation by the exact elapsed delta time on every request
-        if os.environ.get("VERCEL") == "1" or not sim_thread.is_alive():
+        if IS_SERVERLESS or sim_thread is None or not sim_thread.is_alive():
             dt = min(0.4, max(0.04, now - last_serverless_tick)) * time_dilation
             if sim_running:
                 engine.step(dt=dt)
