@@ -1688,9 +1688,18 @@ class Traffic3DDigitalTwin {
         const delta = Math.min(this.clock.getDelta(), 0.05);
         const time = this.clock.getElapsedTime();
 
-        // 1. Vehicle Position & Heading Interpolation (Rock-Solid 60 FPS)
-        const lerpFactor = Math.min(1.0, delta * 12.0);
+        // 1. Vehicle Position & Heading Interpolation with Smooth Kinematic Gliding
+        const lerpFactor = Math.min(1.0, delta * 8.0);
         for (const [id, vEntry] of this.vehicleMeshes.entries()) {
+            const speedKmh = vEntry.speed !== undefined ? vEntry.speed : 30;
+            const speedMs = speedKmh / 3.6;
+
+            // Advance forward continuously if vehicle has velocity (not stopped at red signal)
+            if (speedMs > 0.5) {
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), vEntry.group.rotation.y);
+                vEntry.targetPos.addScaledVector(forward, speedMs * delta * 0.95);
+            }
+
             vEntry.group.position.lerp(vEntry.targetPos, lerpFactor);
 
             let diff = vEntry.targetRotY - vEntry.group.rotation.y;

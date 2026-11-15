@@ -327,9 +327,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dLat = v.lat - prev.lat;
                 const dLng = v.lng - prev.lng;
                 if (Math.abs(dLat) < 0.002 && Math.abs(dLng) < 0.002) {
-                    lat = prev.lat + dLat * progress;
-                    lng = prev.lng + dLng * progress;
+                    lat = prev.lat + dLat * Math.min(1.0, progress);
+                    lng = prev.lng + dLng * Math.min(1.0, progress);
                 }
+            }
+
+            // Client kinematic dead-reckoning forward gliding between telemetry updates
+            if (progress > 1.0 && (v.speed_kmh || 0) > 1.0) {
+                const extraSec = Math.min(2.5, (progress - 1.0) * (serverInterval / 1000.0));
+                const speedMs = (v.speed_kmh / 3.6);
+                const headRad = (v.heading || 0) * (Math.PI / 180.0);
+                const dDist = speedMs * extraSec;
+                lat += (dDist * Math.cos(headRad)) / 111111.0;
+                lng += (dDist * Math.sin(headRad)) / (111111.0 * Math.max(0.2, Math.cos(lat * Math.PI / 180.0)));
             }
 
             const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
@@ -534,7 +544,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const phaseTimerEl = document.getElementById('hud-phase-timer');
             const clearanceStatusEl = document.getElementById('hud-clearance-status');
             
-            if (phaseTimerEl) phaseTimerEl.innerText = mainSig.in_all_red ? 'CLEAR' : `${Math.floor(mainSig.timer || 0)}s`;
+            const maxPhaseSec = 35;
+            const elapsedSec = (mainSig.timer || 0);
+            const remainingSec = Math.max(1, Math.round(maxPhaseSec - (elapsedSec % maxPhaseSec)));
+            
+            if (phaseTimerEl) {
+                if (mainSig.in_all_red) {
+                    phaseTimerEl.innerText = 'CLEAR';
+                } else if (mainSig.in_yellow) {
+                    phaseTimerEl.innerText = `${Math.max(1, Math.round(3.5 - (elapsedSec % 3.5)))}s`;
+                } else {
+                    phaseTimerEl.innerText = `${remainingSec}s`;
+                }
+            }
             
             if (mainSig.in_all_red) {
                 if (phaseNameEl) phaseNameEl.innerText = '🔴 ALL-RED CLEARANCE';
@@ -790,26 +812,39 @@ document.addEventListener('DOMContentLoaded', () => {
             handleTelemetry(state);
         });
 
-        // Serverless (Vercel) Live Telemetry Stream Fallback
+        // Serverless (Vercel) Non-Blocking Sequential Telemetry Stream
         let pollingActive = false;
+        let isFetching = false;
         function activateServerlessPolling() {
             if (pollingActive) return;
             pollingActive = true;
-            console.log("🌐 [Vercel Serverless Mode] Starting live HTTP telemetry polling stream");
-            setInterval(async () => {
-                try {
-                    const res = await fetch('/api/state');
-                    if (res.ok) {
-                        const state = await res.json();
-                        if (!map && state.hotspot) {
-                            initMap(state.hotspot.lat, state.hotspot.lng, state.hotspot.zoom);
+            console.log("🌐 [Vercel Serverless Mode] Clean sequential telemetry polling stream active");
+
+            async function pollNext() {
+                if (!isFetching) {
+                    isFetching = true;
+                    try {
+                        const controller = new AbortController();
+                        const timerId = setTimeout(() => controller.abort(), 2000);
+                        const res = await fetch('/api/state', { signal: controller.signal });
+                        clearTimeout(timerId);
+                        if (res.ok) {
+                            const state = await res.json();
+                            if (!map && state.hotspot) {
+                                initMap(state.hotspot.lat, state.hotspot.lng, state.hotspot.zoom);
+                            }
+                            handleTelemetry(state);
                         }
-                        handleTelemetry(state);
+                    } catch (err) {
+                        // ignore dropped packet
+                    } finally {
+                        isFetching = false;
                     }
-                } catch (err) {
-                    // silently retry next frame
                 }
-            }, 125);
+                setTimeout(pollNext, 450);
+            }
+
+            pollNext();
         }
 
         socket.on('connect_error', () => activateServerlessPolling());
