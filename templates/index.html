@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     
     <!-- Stylesheet -->
-    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=6.0">
     
     <!-- Three.js (r128) & OrbitControls for 3D WebGL Digital Twin -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -254,7 +254,7 @@
     <script>
         window.INITIAL_SIM_STATE = {{ initial_state | tojson if initial_state else 'null' }};
     </script>
-    <script src="/static/js/three_scene.js?v=5.0"></script>
-    <script src="/static/js/dashboard.js?v=5.0"></script>
+    <script src="/static/js/three_scene.js?v=6.0"></script>
+    <script src="/static/js/dashboard.js?v=6.0"></script>
 </body>
 </html>

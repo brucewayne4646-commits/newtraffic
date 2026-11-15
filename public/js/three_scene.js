@@ -126,12 +126,17 @@ class Traffic3DDigitalTwin {
         // 8. Selection Ring
         this.createSelectionRing();
 
-        // 9. Event Listeners
+        // 9. Immediate baseline road network generation (Populated on first paint, zero blank screen)
+        this.buildUnifiedRoadNetwork([], []);
+        this.buildNightSkyline();
+        this.setCameraPreset('junction');
+
+        // 10. Event Listeners
         window.addEventListener('resize', () => this.onResize());
         this.renderer.domElement.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.renderer.domElement.addEventListener('click', (e) => this.onMouseClick(e));
 
-        // 10. Start 60 FPS Animation Loop
+        // 11. Start 60 FPS Animation Loop
         this.animate = this.animate.bind(this);
         requestAnimationFrame(this.animate);
 
@@ -572,6 +577,9 @@ class Traffic3DDigitalTwin {
     // ==========================================
     loadHotspot(hotspot) {
         if (!hotspot) return;
+        if (this.currentHotspot && this.currentHotspot.id === hotspot.id && this.roadMeshes.length > 0) {
+            return;
+        }
         this.currentHotspot = hotspot;
         this.centerLat = hotspot.lat;
         this.centerLng = hotspot.lng;
@@ -886,44 +894,63 @@ class Traffic3DDigitalTwin {
             });
         });
 
-        // 5. SILK BOARD DOUBLE-DECKER ELEVATED FLYOVER (Authentic landmark along Hosur corridor)
-        const flyoverPiersZ = [-270, -225, -180, -135, -90, 90, 135, 180, 225, 270];
-        const pierMat = new THREE.MeshStandardMaterial({ color: 0x273549, roughness: 0.8, metalness: 0.25 });
-        const flyDeckMat = new THREE.MeshStandardMaterial({ color: 0x182030, roughness: 0.85, metalness: 0.15 });
-        const parapetMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.65, metalness: 0.2 });
+        // 5. SILK BOARD CONTINUOUS ELEVATED EXPRESSWAY FLYOVER (Authentic landmark along Hosur corridor)
+        const flyoverPiersZ = [-280, -220, -160, -100, -42, 42, 100, 160, 220, 280];
+        const pierMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7, metalness: 0.3 });
+        const flyDeckMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8, metalness: 0.2 });
+        const parapetMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6, metalness: 0.3 });
+        const barrierMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5, metalness: 0.4 });
 
         flyoverPiersZ.forEach(pz => {
             const pierPos = focalCenter.clone().add(new THREE.Vector3(0, 0, pz));
-            const col = new THREE.Mesh(new THREE.BoxGeometry(2.2, 11.0, 2.0), pierMat);
-            col.position.set(pierPos.x, 5.5, pierPos.z);
+            const col = new THREE.Mesh(new THREE.BoxGeometry(2.4, 11.2, 2.4), pierMat);
+            col.position.set(pierPos.x, 5.6, pierPos.z);
             col.castShadow = true;
             this.scene.add(col);
             this.flyoverMeshes.push(col);
 
-            const beam = new THREE.Mesh(new THREE.BoxGeometry(15.0, 1.4, 2.6), pierMat);
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(15.2, 1.4, 3.2), pierMat);
             beam.position.set(pierPos.x, 11.7, pierPos.z);
             beam.castShadow = true;
             this.scene.add(beam);
             this.flyoverMeshes.push(beam);
         });
 
-        // Twin Elevated Flyover Decks spanning overhead at y = 12.8m (skipping center 70m for open ground junction view)
-        [-1, 1].forEach(dir => {
-            const spanLen = 220.0;
-            const spanZ = focalCenter.z + dir * (spanLen / 2 + 50.0);
-            const deck = new THREE.Mesh(new THREE.BoxGeometry(14.0, 0.8, spanLen), flyDeckMat);
-            deck.position.set(focalCenter.x, 12.8, spanZ);
-            deck.castShadow = true;
-            this.scene.add(deck);
-            this.flyoverMeshes.push(deck);
+        // Continuous uninterrupted 640m elevated expressway deck at y = 12.8m spanning across the corridor
+        const totalFlyoverLen = 640.0;
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(14.4, 0.85, totalFlyoverLen), flyDeckMat);
+        deck.position.set(focalCenter.x, 12.8, focalCenter.z);
+        deck.castShadow = true;
+        deck.receiveShadow = true;
+        this.scene.add(deck);
+        this.flyoverMeshes.push(deck);
 
-            // Safety Parapet Barriers
-            [-6.8, 6.8].forEach(px => {
-                const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.1, spanLen), parapetMat);
-                parapet.position.set(focalCenter.x + px, 13.55, spanZ);
-                this.scene.add(parapet);
-                this.flyoverMeshes.push(parapet);
-            });
+        // Center Jersey Barrier Divider on Flyover
+        const medianFly = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.85, totalFlyoverLen), barrierMat);
+        medianFly.position.set(focalCenter.x, 13.65, focalCenter.z);
+        this.scene.add(medianFly);
+        this.flyoverMeshes.push(medianFly);
+
+        // Continuous Outer Safety Parapet Barriers with Hazard Reflectors
+        [-7.1, 7.1].forEach(px => {
+            const parapet = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.25, totalFlyoverLen), parapetMat);
+            parapet.position.set(focalCenter.x + px, 13.85, focalCenter.z);
+            this.scene.add(parapet);
+            this.flyoverMeshes.push(parapet);
+        });
+
+        // Flyover Lane Markings (White dashed lines in both directions)
+        [-3.6, 3.6].forEach(flyLaneOffset => {
+            const flyDashSpacing = 8.0;
+            const flyDashCount = Math.floor(totalFlyoverLen / flyDashSpacing);
+            for (let d = 0; d < flyDashCount; d++) {
+                const zPos = -totalFlyoverLen / 2 + (d + 0.5) * flyDashSpacing;
+                const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 4.0), mc.whiteMarking);
+                dash.rotation.x = -Math.PI / 2;
+                dash.position.set(focalCenter.x + flyLaneOffset, 13.25, focalCenter.z + zPos);
+                this.scene.add(dash);
+                this.flyoverMeshes.push(dash);
+            }
         });
     }
 
@@ -1516,6 +1543,122 @@ class Traffic3DDigitalTwin {
     // ==========================================
     // 12. TELEMETRY SYNCHRONIZATION
     // ==========================================
+    calculateVehicle3DTransform(veh) {
+        const cid = (veh.corridor_id || '').toUpperCase();
+        let arm = 'west';
+        let inbound = true;
+
+        if (cid.includes('BTM_TO') || (cid.includes('_TO_SILK') && cid.includes('BTM'))) {
+            arm = 'west'; inbound = true;
+        } else if (cid.includes('SILK_TO_BTM') || cid.includes('TO_BTM')) {
+            arm = 'west'; inbound = false;
+        } else if (cid.includes('HSR_TO') || (cid.includes('_TO_SILK') && cid.includes('HSR'))) {
+            arm = 'east'; inbound = true;
+        } else if (cid.includes('SILK_TO_HSR') || cid.includes('TO_HSR')) {
+            arm = 'east'; inbound = false;
+        } else if (cid.includes('MADIWALA_TO') || (cid.includes('_TO_SILK') && cid.includes('MADIWALA'))) {
+            arm = 'north'; inbound = true;
+        } else if (cid.includes('SILK_TO_MADIWALA') || cid.includes('TO_MADIWALA')) {
+            arm = 'north'; inbound = false;
+        } else if (cid.includes('ECITY_TO') || cid.includes('HOSUR_TO') || (cid.includes('_TO_SILK') && (cid.includes('ECITY') || cid.includes('HOSUR')))) {
+            arm = 'south'; inbound = true;
+        } else if (cid.includes('SILK_TO_ECITY') || cid.includes('SILK_TO_HOSUR') || cid.includes('TO_ECITY')) {
+            arm = 'south'; inbound = false;
+        } else {
+            const cosLat = Math.cos(this.centerLat * Math.PI / 180.0);
+            const dx = (veh.lng - this.centerLng) * 111320.0 * cosLat;
+            const dz = -(veh.lat - this.centerLat) * 110540.0;
+            if (Math.abs(dx) > Math.abs(dz)) {
+                arm = dx < 0 ? 'west' : 'east';
+                inbound = (arm === 'west') ? (dx < -25) : (dx > 25);
+            } else {
+                arm = dz < 0 ? 'north' : 'south';
+                inbound = (arm === 'north') ? (dz < -25) : (dz > 25);
+            }
+        }
+
+        let progress = 0.5;
+        if (veh.distance_m !== undefined && veh.corridor_len && veh.corridor_len > 0) {
+            progress = Math.max(0.0, Math.min(1.0, veh.distance_m / veh.corridor_len));
+        } else {
+            const cosLat = Math.cos(this.centerLat * Math.PI / 180.0);
+            const dx = (veh.lng - this.centerLng) * 111320.0 * cosLat;
+            const dz = -(veh.lat - this.centerLat) * 110540.0;
+            const dist = Math.hypot(dx, dz);
+            progress = Math.max(0.0, Math.min(1.0, 1.0 - (dist / 320.0)));
+        }
+
+        const laneIdx = (veh.lane !== undefined) ? (Math.abs(veh.lane) % 3) : ((Math.abs(veh.id ? veh.id.charCodeAt(veh.id.length - 1) : 0)) % 3);
+        const lateralDist = 4.4 + laneIdx * 2.8;
+
+        const maxDist = 320.0;
+        const stopDist = 22.0;
+
+        let x = 0, z = 0, rotY = 0;
+
+        if (arm === 'west') {
+            if (inbound) {
+                rotY = Math.PI / 2;
+                z = lateralDist;
+                x = -maxDist + progress * (maxDist - stopDist);
+                if (progress > 0.96 && veh.speed_kmh > 1.0) {
+                    x = -stopDist + (progress - 0.96) * 25.0 * 25.0;
+                }
+            } else {
+                rotY = -Math.PI / 2;
+                z = -lateralDist;
+                x = -stopDist - progress * (maxDist - stopDist);
+            }
+        } else if (arm === 'east') {
+            if (inbound) {
+                rotY = -Math.PI / 2;
+                z = -lateralDist;
+                x = maxDist - progress * (maxDist - stopDist);
+                if (progress > 0.96 && veh.speed_kmh > 1.0) {
+                    x = stopDist - (progress - 0.96) * 25.0 * 25.0;
+                }
+            } else {
+                rotY = Math.PI / 2;
+                z = lateralDist;
+                x = stopDist + progress * (maxDist - stopDist);
+            }
+        } else if (arm === 'north') {
+            if (inbound) {
+                rotY = 0;
+                x = lateralDist;
+                z = -maxDist + progress * (maxDist - stopDist);
+                if (progress > 0.96 && veh.speed_kmh > 1.0) {
+                    z = -stopDist + (progress - 0.96) * 25.0 * 25.0;
+                }
+            } else {
+                rotY = Math.PI;
+                x = -lateralDist;
+                z = -stopDist - progress * (maxDist - stopDist);
+            }
+        } else if (arm === 'south') {
+            if (inbound) {
+                rotY = Math.PI;
+                x = -lateralDist;
+                z = maxDist - progress * (maxDist - stopDist);
+                if (progress > 0.96 && veh.speed_kmh > 1.0) {
+                    z = stopDist - (progress - 0.96) * 25.0 * 25.0;
+                }
+            } else {
+                rotY = 0;
+                x = lateralDist;
+                z = stopDist + progress * (maxDist - stopDist);
+            }
+        }
+
+        return {
+            pos: new THREE.Vector3(x, 0, z),
+            rotY: rotY,
+            arm: arm,
+            inbound: inbound,
+            lateralDist: lateralDist
+        };
+    }
+
     updateTelemetry(state) {
         if (!state) return;
 
@@ -1529,18 +1672,15 @@ class Traffic3DDigitalTwin {
             this.setSignalState(signals[0]);
         }
 
-        // 2. Synchronize Vehicles using map coordinates and exact forward velocity heading
+        // 2. Synchronize Vehicles locked strictly inside the 4 road corridors (Zero Void Floating)
         const incomingVehicles = state.vehicles || [];
         const seenIds = new Set();
 
         incomingVehicles.forEach(veh => {
             seenIds.add(veh.id);
-            const targetPos = this.latLngTo3D(veh.lat, veh.lng, 0);
-
-            const headingRad = (veh.heading || 0) * (Math.PI / 180.0);
-            const vx = Math.sin(headingRad);
-            const vz = -Math.cos(headingRad);
-            const targetRotY = Math.atan2(vx, vz);
+            const transform = this.calculateVehicle3DTransform(veh);
+            const targetPos = transform.pos;
+            const targetRotY = transform.rotY;
 
             let vEntry = this.vehicleMeshes.get(veh.id);
             if (!vEntry) {
@@ -1555,7 +1695,10 @@ class Traffic3DDigitalTwin {
                     targetRotY: targetRotY,
                     speed: veh.speed_kmh || 0,
                     type: veh.type,
-                    data: veh
+                    data: veh,
+                    arm: transform.arm,
+                    inbound: transform.inbound,
+                    lateralDist: transform.lateralDist
                 };
                 this.vehicleMeshes.set(veh.id, vEntry);
             } else {
@@ -1563,6 +1706,9 @@ class Traffic3DDigitalTwin {
                 vEntry.targetRotY = targetRotY;
                 vEntry.speed = veh.speed_kmh || 0;
                 vEntry.data = veh;
+                vEntry.arm = transform.arm;
+                vEntry.inbound = transform.inbound;
+                vEntry.lateralDist = transform.lateralDist;
             }
         });
 
@@ -1780,10 +1926,14 @@ class Traffic3DDigitalTwin {
             while (diff > Math.PI) diff -= Math.PI * 2;
             vEntry.group.rotation.y += diff * lerpFactor;
 
-            // Continuous seamless circulation: loop back when leaving visible horizon
-            if (vEntry.group.position.length() > 340) {
-                vEntry.targetPos.multiplyScalar(-0.85);
-                vEntry.group.position.copy(vEntry.targetPos);
+            // Continuous seamless circulation: loop back along the same road arm mouth
+            if (Math.abs(vEntry.group.position.x) > 340) {
+                vEntry.targetPos.x = vEntry.group.position.x > 0 ? -325 : 325;
+                vEntry.group.position.x = vEntry.targetPos.x;
+            }
+            if (Math.abs(vEntry.group.position.z) > 340) {
+                vEntry.targetPos.z = vEntry.group.position.z > 0 ? -325 : 325;
+                vEntry.group.position.z = vEntry.targetPos.z;
             }
 
             // Ambulance Strobes

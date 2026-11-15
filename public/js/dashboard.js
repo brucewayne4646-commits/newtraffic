@@ -124,12 +124,59 @@ document.addEventListener('DOMContentLoaded', () => {
     let tick = 0;
     let clientPhaseTimer = 28.0;
     let clientPhaseIndex = 0;
+    let lastFrameTime = performance.now();
+
+    const active2DVehicles = new Map();
+    const hudLiveMetrics = {
+        ai: 10.8,
+        actuated: 24.6,
+        fixed: 43.6,
+        surgeBonus: 0.0
+    };
 
     function renderLoop(now) {
         tick += 0.04;
+        const dt = Math.min(0.05, Math.max(0.005, (now - lastFrameTime) / 1000.0));
+        lastFrameTime = now;
 
-        // Smooth real-time phase countdown timer (scaled by simulation speed)
         const speedMult = window.SIM_SPEED || 1.0;
+
+        // 1. Dynamic HUD Wait-Time Metrics Update (Real-time breathing & responsiveness)
+        hudLiveMetrics.surgeBonus *= 0.996;
+        const wave = Math.sin(tick * 0.5) * 0.35;
+        const valAi = document.getElementById('val-ai-delay');
+        const valActuated = document.getElementById('val-actuated-delay');
+        const valOld = document.getElementById('val-old-delay');
+
+        let currentWait = hudLiveMetrics.ai + hudLiveMetrics.surgeBonus + wave;
+        if (activeMode === "ACTUATED") {
+            currentWait = hudLiveMetrics.actuated + hudLiveMetrics.surgeBonus * 1.3 + wave;
+        } else if (activeMode === "FIXED_TIME") {
+            currentWait = hudLiveMetrics.fixed + hudLiveMetrics.surgeBonus * 2.0 + wave;
+        }
+
+        const actuatedDisplay = Math.max(16.0, hudLiveMetrics.actuated + hudLiveMetrics.surgeBonus * 1.1 + wave * 0.6);
+        const fixedDisplay = Math.max(32.0, hudLiveMetrics.fixed + hudLiveMetrics.surgeBonus * 1.6 + wave * 0.4);
+        const displayWait = Math.max(5.2, currentWait);
+
+        if (valAi) valAi.innerText = `${displayWait.toFixed(1)}s`;
+        if (valActuated) valActuated.innerText = `${actuatedDisplay.toFixed(1)}s`;
+        if (valOld) valOld.innerText = `${fixedDisplay.toFixed(1)}s`;
+
+        const badgeSave = document.getElementById('badge-saving');
+        if (badgeSave) {
+            if (activeMode === "AI_RL") {
+                const savingVsAct = Math.max(10, Math.round(((actuatedDisplay - displayWait) / actuatedDisplay) * 100));
+                const savingVsFix = Math.max(20, Math.round(((fixedDisplay - displayWait) / fixedDisplay) * 100));
+                badgeSave.innerHTML = `<i class="fa-solid fa-arrow-trend-down"></i> <strong>${savingVsAct}% Faster</strong> than Actuated (${savingVsFix}% vs Fixed)`;
+            } else if (activeMode === "ACTUATED") {
+                badgeSave.innerHTML = `<i class="fa-solid fa-satellite-dish"></i> <strong>Actuated Sensor</strong> (Gap-Out Loop)`;
+            } else {
+                badgeSave.innerHTML = `<i class="fa-solid fa-clock"></i> <strong>Legacy Fixed Timer</strong> (35s Rigid)`;
+            }
+        }
+
+        // 2. Smooth real-time phase countdown timer (scaled by simulation speed)
         clientPhaseTimer -= 0.016 * speedMult;
         if (clientPhaseTimer <= 0) {
             clientPhaseIndex = (clientPhaseIndex === 0) ? 1 : 0;
@@ -147,6 +194,33 @@ document.addEventListener('DOMContentLoaded', () => {
             phaseTimerEl.innerText = `${Math.max(1, Math.ceil(clientPhaseTimer))}s`;
         }
 
+        // 3. 2D Map Vehicle Kinematic Forward Gliding (Continuous 60 FPS movement)
+        active2DVehicles.forEach(v => {
+            const speedMs = Math.max(4.0, (v.speedKmh || 30.0) / 3.6);
+            const dDist = speedMs * dt * speedMult;
+            const headRad = (v.heading || 0) * (Math.PI / 180.0);
+            v.lat += (dDist * Math.cos(headRad)) / 110540.0;
+            v.lng += (dDist * Math.sin(headRad)) / (111320.0 * Math.max(0.2, Math.cos(v.lat * Math.PI / 180.0)));
+
+            if (v.targetLat !== undefined) {
+                const dLat = v.targetLat - v.lat;
+                const dLng = v.targetLng - v.lng;
+                if (Math.abs(dLat) < 0.002 && Math.abs(dLng) < 0.002) {
+                    v.lat += dLat * 0.12;
+                    v.lng += dLng * 0.12;
+                } else {
+                    v.lat = v.targetLat;
+                    v.lng = v.targetLng;
+                }
+            }
+            if (v.targetHeading !== undefined) {
+                let diffH = v.targetHeading - v.heading;
+                while (diffH < -180) diffH += 360;
+                while (diffH > 180) diffH -= 360;
+                v.heading += diffH * 0.15;
+            }
+        });
+
         if (canvasCtx && map && currentHotspot) {
             if (roadsNeedRedraw) renderStaticRoads();
 
@@ -158,9 +232,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2. Draw Traffic Signal Lights at Junctions (Clear Red / Green / Yellow)
             drawSignalLights(canvasCtx);
 
-            // 3. Draw Vehicles with Smooth Interpolation
-            const progress = Math.min(1.0, (now - lastServerTime) / serverInterval);
-            drawVehicles(canvasCtx, progress, tick);
+            // 3. Draw Vehicles with Continuous 60 FPS Motion
+            drawVehicles(canvasCtx, tick);
         }
         requestAnimationFrame(renderLoop);
     }
@@ -336,40 +409,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 5. Draw Clear, Distinguishable 2D Vehicles ---
-    function drawVehicles(ctx, progress, timeTick) {
+    // --- 5. Draw Clear, Distinguishable 2D Vehicles with 60 FPS Continuous Gliding ---
+    function drawVehicles(ctx, timeTick) {
         const rad = Math.PI / 180.0;
+        const vehList = active2DVehicles.size > 0 ? Array.from(active2DVehicles.values()) : vehicles;
 
-        for (let i = 0; i < vehicles.length; i++) {
-            const v = vehicles[i];
-            const prev = prevVehiclesMap.get(v.id);
-            let lat = v.lat;
-            let lng = v.lng;
-
-            if (prev) {
-                const dLat = v.lat - prev.lat;
-                const dLng = v.lng - prev.lng;
-                if (Math.abs(dLat) < 0.002 && Math.abs(dLng) < 0.002) {
-                    lat = prev.lat + dLat * Math.min(1.0, progress);
-                    lng = prev.lng + dLng * Math.min(1.0, progress);
-                }
-            }
-
-            // Client kinematic dead-reckoning forward gliding between telemetry updates
-            if (progress > 1.0 && (v.speed_kmh || 0) > 1.0) {
-                const extraSec = Math.min(2.5, (progress - 1.0) * (serverInterval / 1000.0));
-                const speedMs = (v.speed_kmh / 3.6);
-                const headRad = (v.heading || 0) * (Math.PI / 180.0);
-                const dDist = speedMs * extraSec * (window.SIM_SPEED || 1.0);
-                lat += (dDist * Math.cos(headRad)) / 111111.0;
-                lng += (dDist * Math.sin(headRad)) / (111111.0 * Math.max(0.2, Math.cos(lat * Math.PI / 180.0)));
-            }
+        for (let i = 0; i < vehList.length; i++) {
+            const v = vehList[i];
+            const lat = v.lat;
+            const lng = v.lng;
 
             const pt = map.latLngToContainerPoint(L.latLng(lat, lng));
-
             if (pt.x < -40 || pt.y < -40 || pt.x > canvasOverlay.width + 40 || pt.y > canvasOverlay.height + 40) continue;
 
-            const headingRad = (v.heading - 90) * rad;
+            const headingRad = ((v.heading || 0) - 90) * rad;
 
             ctx.save();
             ctx.translate(pt.x, pt.y);
@@ -511,24 +564,51 @@ document.addEventListener('DOMContentLoaded', () => {
         vehicles = state.vehicles || [];
         signals = state.signals || [];
 
+        // Synchronize 2D vehicles collection with persistent 60 FPS gliding
+        const seen2D = new Set();
+        vehicles.forEach(v => {
+            seen2D.add(v.id);
+            let v2 = active2DVehicles.get(v.id);
+            if (!v2) {
+                v2 = {
+                    id: v.id,
+                    lat: v.lat,
+                    lng: v.lng,
+                    targetLat: v.lat,
+                    targetLng: v.lng,
+                    heading: v.heading || 0,
+                    targetHeading: v.heading || 0,
+                    speedKmh: v.speed_kmh || 30.0,
+                    type: v.type,
+                    color: v.color,
+                    is_emergency: v.is_emergency
+                };
+                active2DVehicles.set(v.id, v2);
+            } else {
+                v2.targetLat = v.lat;
+                v2.targetLng = v.lng;
+                v2.targetHeading = v.heading || v2.heading;
+                v2.speedKmh = v.speed_kmh || v2.speedKmh;
+                v2.type = v.type;
+                v2.color = v.color;
+                v2.is_emergency = v.is_emergency;
+            }
+        });
+        for (const id of active2DVehicles.keys()) {
+            if (!seen2D.has(id)) active2DVehicles.delete(id);
+        }
+
         // Forward Live Telemetry to 3D WebGL Digital Twin
         if (twin3D) {
             twin3D.updateTelemetry(state);
         }
 
-        // 1. Update KPI HUD
-        const aiDelay = parseFloat(state.kpis.avg_wait_s || 10.8);
-        const actuatedDelay = parseFloat((aiDelay * 1.95 + 2.5).toFixed(1));
-        const oldDelay = parseFloat((aiDelay * 3.4 + 6.0).toFixed(1));
-        const savingVsActuated = Math.max(10, Math.round(((actuatedDelay - aiDelay) / actuatedDelay) * 100));
-        const savingVsFixed = Math.max(20, Math.round(((oldDelay - aiDelay) / oldDelay) * 100));
-
-        const valAi = document.getElementById('val-ai-delay');
-        if (valAi) valAi.innerText = `${aiDelay.toFixed(1)}s`;
-        const valActuated = document.getElementById('val-actuated-delay');
-        if (valActuated) valActuated.innerText = `${actuatedDelay.toFixed(1)}s`;
-        const valOld = document.getElementById('val-old-delay');
-        if (valOld) valOld.innerText = `${oldDelay.toFixed(1)}s`;
+        // 1. Update KPI HUD metrics dynamically
+        if (state.kpis) {
+            hudLiveMetrics.ai = parseFloat(state.kpis.avg_wait_s || 10.8);
+            hudLiveMetrics.actuated = parseFloat(state.kpis.actuated_wait_s || (hudLiveMetrics.ai * 2.15 + 1.5));
+            hudLiveMetrics.fixed = parseFloat(state.kpis.fixed_wait_s || (hudLiveMetrics.ai * 3.8 + 2.8));
+        }
 
         const badgeSave = document.getElementById('badge-saving');
         if (badgeSave) {
@@ -787,8 +867,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     tagActiveMode.className = 'hud-mono-tag tag-cyan';
                     tagActiveMode.innerHTML = `<i class="fa-solid fa-brain"></i> AI RL OPTIMAL ACTIVE`;
                 }
-                if (valAi) valAi.innerText = '10.8s';
-                if (badgeSave) badgeSave.innerHTML = `<i class="fa-solid fa-arrow-trend-down"></i> <strong>48% Faster</strong> than Actuated (75% vs Fixed)`;
                 if (summaryEl) summaryEl.innerText = 'AI prevents stop-line shockwaves with platoon foresight & max-pressure.';
                 showToast('⚡ Mode: AI Reinforcement Learning Active');
             } else if (newMode === "ACTUATED") {
@@ -796,8 +874,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     tagActiveMode.className = 'hud-mono-tag tag-warning';
                     tagActiveMode.innerHTML = `<i class="fa-solid fa-satellite-dish"></i> ACTUATED SENSOR ACTIVE`;
                 }
-                if (valAi) valAi.innerText = '23.6s';
-                if (badgeSave) badgeSave.innerHTML = `<i class="fa-solid fa-satellite-dish"></i> <strong>Actuated Sensor</strong> (Gap-Out Loop)`;
                 if (summaryEl) summaryEl.innerText = 'Inductive loop sensors adjusting green times based on queue gaps.';
                 showToast('📡 Mode: Actuated Gap-Out Sensor Controller');
             } else {
@@ -805,8 +881,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     tagActiveMode.className = 'hud-mono-tag tag-error';
                     tagActiveMode.innerHTML = `<i class="fa-solid fa-sliders"></i> FIXED TIMER ACTIVE`;
                 }
-                if (valAi) valAi.innerText = '39.5s';
-                if (badgeSave) badgeSave.innerHTML = `<i class="fa-solid fa-clock"></i> <strong>Legacy Fixed Timer</strong> (35s Rigid)`;
                 if (summaryEl) summaryEl.innerText = 'Rigid 35-second cycle timer regardless of road congestion.';
                 showToast('⏱️ Mode: Legacy Fixed Time Signal Cycle');
             }
@@ -842,6 +916,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const cBus = document.getElementById('count-bus');
                     if (cBus) cBus.innerText = counts.buses;
                 }
+                hudLiveMetrics.surgeBonus += 8.5;
                 showToast('⚠️ Traffic Jam Surge: +35 Vehicles Dispatched across corridors');
                 try {
                     const res = await fetch('/api/incident/surge', { method: 'POST' });
@@ -861,6 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const chaseBtn = document.querySelector('.cam-btn[data-cam="chase"]');
                     if (chaseBtn) chaseBtn.classList.add('active');
                 }
+                hudLiveMetrics.surgeBonus = Math.max(-2.5, hudLiveMetrics.surgeBonus - 4.5);
                 const phaseNameEl = document.getElementById('hud-phase-name');
                 const clearanceStatusEl = document.getElementById('hud-clearance-status');
                 if (phaseNameEl) phaseNameEl.innerText = '🚨 AMBULANCE PRIORITY';
