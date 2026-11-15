@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration><input><net-file value="chennai_guindy.net.xml" /><route-files value="chennai_guindy.rou.xml" /></input><time><begin value="0" /><end value="3600" /><step-length value="1.0" /></time></configuration>

@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration><input><net-file value="delhi_cp.net.xml" /><route-files value="delhi_cp.rou.xml" /></input><time><begin value="0" /><end value="3600" /><step-length value="1.0" /></time></configuration>

@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration><input><net-file value="mumbai_bkc.net.xml" /><route-files value="mumbai_bkc.rou.xml" /></input><time><begin value="0" /><end value="3600" /><step-length value="1.0" /></time></configuration>

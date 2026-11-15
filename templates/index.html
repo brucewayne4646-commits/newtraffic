@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart City AI Traffic Optimization Digital Twin</title>
+    
+    <!-- Vercel Design System Fonts: Geist & Geist Mono + Fallbacks -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet Map & Icons -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    
+    <!-- Three.js (r128) & OrbitControls for 3D WebGL Digital Twin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <!-- Atmospheric Vercel Background Mesh Gradient Glow -->
+    <div class="mesh-gradient-bg"></div>
+
+    <div class="app-container">
+        <!-- 1. Vercel Top Navigation Bar (nav-bar) -->
+        <header class="top-header">
+            <div class="brand-section">
+                <div class="brand-icon-wrapper">
+                    <!-- Traffic Light Intelligence Icon -->
+                    <i class="fa-solid fa-cube brand-icon" id="brand-mode-icon"></i>
+                    <span class="live-beacon" title="Live WebSocket Telemetry Connected"></span>
+                </div>
+                <div class="brand-info">
+                    <div class="brand-title-row">
+                        <h1 class="brand-title">TRAFFIC INTELLIGENCE 3D</h1>
+                        <span class="badge-country">INDIA 🇮🇳</span>
+                    </div>
+                    <p class="brand-subtitle">3D DIGITAL TWIN • TRAFFIC OPTIMIZATION ENGINE</p>
+                </div>
+            </div>
+
+            <!-- Central Location Selector (form-input style) -->
+            <div class="location-wrapper">
+                <div class="location-input-pill">
+                    <i class="fa-solid fa-location-dot loc-icon"></i>
+                    <select id="location-select" class="loc-dropdown" aria-label="Select Traffic Hotspot">
+                        <option value="bengaluru_silkboard" selected>Bengaluru — Silk Board Junction</option>
+                        <option value="mumbai_bkc">Mumbai — BKC Junction</option>
+                        <option value="delhi_cp">Delhi NCR — Connaught Place</option>
+                        <option value="hyderabad_hitec">Hyderabad — Hitec City Cyber Towers</option>
+                        <option value="pune_hinjawadi">Pune — Hinjawadi Shivaji Chowk</option>
+                        <option value="chennai_guindy">Chennai — Guindy Kathipara</option>
+                    </select>
+                    <i class="fa-solid fa-chevron-down loc-chevron"></i>
+                </div>
+            </div>
+
+            <!-- Right Header Controls: 2D/3D View Switcher, Speed Segment & Signal Mode -->
+            <div class="header-controls">
+                <!-- Dimension Switcher Pill: 3D Twin | 2D Map -->
+                <div class="view-dimension-group" title="Toggle Simulation Perspective">
+                    <button class="dimension-btn active" id="btn-view-3d" data-view="3D">
+                        <i class="fa-solid fa-cube text-cyan"></i> <span>3D Twin</span>
+                    </button>
+                    <button class="dimension-btn" id="btn-view-2d" data-view="2D">
+                        <i class="fa-solid fa-map"></i> <span>2D Map</span>
+                    </button>
+                </div>
+
+                <!-- Speed Controls Segmented Pill -->
+                <div class="speed-control-group" title="Simulation Speed Multiplier">
+                    <span class="control-eyebrow"><i class="fa-solid fa-gauge-high"></i> SPEED</span>
+                    <div class="speed-segment">
+                        <button class="speed-btn" data-speed="1.0" id="btn-speed-1x">1x</button>
+                        <button class="speed-btn active" data-speed="2.0" id="btn-speed-2x">2x</button>
+                        <button class="speed-btn" data-speed="4.0" id="btn-speed-4x">4x</button>
+                    </div>
+                </div>
+
+                <!-- Signal Mode Switcher (AI RL Optimal | Actuated Sensor | Fixed Timer) -->
+                <div class="mode-switch-group">
+                    <button class="mode-switch-btn active" id="btn-mode-ai" data-mode="AI_RL" title="Deep Q-Network + Max-Pressure + Platoon Lookahead">
+                        <i class="fa-solid fa-brain"></i> <span>AI RL Optimal</span>
+                    </button>
+                    <button class="mode-switch-btn" id="btn-mode-actuated" data-mode="ACTUATED" title="Vehicle-Actuated Inductive Gap-Out Sensor Controller">
+                        <i class="fa-solid fa-satellite-dish"></i> <span>Actuated</span>
+                    </button>
+                    <button class="mode-switch-btn" id="btn-mode-old" data-mode="FIXED_TIME" title="Rigid 35s Static Fixed Cycle">
+                        <i class="fa-solid fa-sliders"></i> <span>Fixed Timer</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- 2. Hero Telemetry & KPI HUD (Vercel Card Grids with Polarity Flip) -->
+        <section class="telemetry-hud">
+            <!-- Metric Card 1: AI Delay vs Baseline (Polarity-flipped Featured Ink Card) -->
+            <div class="hud-card card-ai-featured">
+                <div class="card-accent-bar"></div>
+                <div class="card-header">
+                    <span class="hud-mono-tag tag-cyan" id="hud-active-mode-tag"><i class="fa-solid fa-bolt"></i> AI RL OPTIMAL ACTIVE</span>
+                    <span class="card-status-dot green"></span>
+                </div>
+                <div class="card-metric-row">
+                    <span class="metric-number text-white" id="val-ai-delay">10.8s</span>
+                    <span class="metric-unit">avg wait</span>
+                </div>
+                <div class="efficiency-badge" id="badge-saving">
+                    <i class="fa-solid fa-arrow-trend-down"></i> <strong>48% Faster</strong> than Actuated
+                </div>
+            </div>
+
+            <!-- Metric Card 2: Benchmark Comparison (Actuated vs Fixed vs AI) -->
+            <div class="hud-card card-marketing-clean">
+                <div class="card-header">
+                    <span class="hud-mono-tag tag-error"><i class="fa-solid fa-chart-simple"></i> BASELINE BENCHMARKS</span>
+                    <span class="card-status-dot yellow"></span>
+                </div>
+                <div class="stats-grid" style="grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px;">
+                    <div class="stat-cell" style="background: rgba(255,255,255,0.03); padding: 6px 10px; border-radius: 6px;">
+                        <span class="stat-label" style="font-size: 11px; color: #94a3b8;">Actuated Sensor</span>
+                        <span class="stat-value text-warning" id="val-actuated-delay" style="font-size: 18px; font-weight: 700;">22.4s</span>
+                    </div>
+                    <div class="stat-cell" style="background: rgba(255,255,255,0.03); padding: 6px 10px; border-radius: 6px;">
+                        <span class="stat-label" style="font-size: 11px; color: #94a3b8;">Fixed Timer</span>
+                        <span class="stat-value text-error" id="val-old-delay" style="font-size: 18px; font-weight: 700;">39.5s</span>
+                    </div>
+                </div>
+                <div class="hud-subtext" id="hud-mode-summary" style="margin-top: 8px; font-size: 11px; color: #94a3b8;">
+                    AI prevents stop-line shockwaves with platoon foresight & max-pressure.
+                </div>
+            </div>
+
+            <!-- Metric Card 3: Active Phase & Clearance Status (Canvas Marketing Card) -->
+            <div class="hud-card card-marketing-clean">
+                <div class="card-header">
+                    <span class="hud-mono-tag tag-primary"><i class="fa-solid fa-arrows-split-up-and-left"></i> ACTIVE SIGNAL PHASE</span>
+                    <span class="live-phase-pill" id="hud-phase-name">East-West Arterial</span>
+                </div>
+                <div class="card-metric-row">
+                    <span class="metric-number text-link" id="hud-phase-timer">15s</span>
+                    <span class="metric-unit">remaining</span>
+                </div>
+                <div class="clearance-status" id="hud-clearance-status">
+                    <i class="fa-solid fa-shield-check text-success"></i> Conflict Box Protected
+                </div>
+            </div>
+
+            <!-- Metric Card 4: Active Traffic Fleet (Replaced Sustainability) -->
+            <div class="hud-card card-marketing-clean" id="card-fleet-mix">
+                <div class="card-header">
+                    <span class="hud-mono-tag tag-violet"><i class="fa-solid fa-car-side"></i> ACTIVE TRAFFIC FLEET</span>
+                    <span class="fleet-total-tag" id="val-total-fleet"><strong id="val-total-vehicles">0</strong> active</span>
+                </div>
+                <div class="fleet-badges-grid">
+                    <div class="fleet-badge-item" title="Two-Wheelers (Bikes/Scooters)">
+                        <span class="fleet-badge-icon text-cyan"><i class="fa-solid fa-motorcycle"></i></span>
+                        <div class="fleet-badge-data">
+                            <span class="fleet-badge-name">Bike</span>
+                            <span class="fleet-badge-val" id="count-bike">0</span>
+                        </div>
+                    </div>
+                    <div class="fleet-badge-item" title="Auto Rickshaws">
+                        <span class="fleet-badge-icon text-warning"><i class="fa-solid fa-taxi"></i></span>
+                        <div class="fleet-badge-data">
+                            <span class="fleet-badge-name">Auto</span>
+                            <span class="fleet-badge-val" id="count-auto">0</span>
+                        </div>
+                    </div>
+                    <div class="fleet-badge-item" title="Cars & Cabs">
+                        <span class="fleet-badge-icon text-success"><i class="fa-solid fa-car"></i></span>
+                        <div class="fleet-badge-data">
+                            <span class="fleet-badge-name">Car</span>
+                            <span class="fleet-badge-val" id="count-car">0</span>
+                        </div>
+                    </div>
+                    <div class="fleet-badge-item" title="Buses">
+                        <span class="fleet-badge-icon text-orange"><i class="fa-solid fa-bus"></i></span>
+                        <div class="fleet-badge-data">
+                            <span class="fleet-badge-name">Bus</span>
+                            <span class="fleet-badge-val" id="count-bus">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. Primary Interactive Stage (Supports 3D WebGL Digital Twin, 📹 AI CCTV Cam, and 2D Map) -->
+        <main class="stage-container" id="stage-viewport">
+            <!-- 3D Three.js WebGL Viewport -->
+            <div id="three-container" class="active-viewport"></div>
+
+            <!-- 2D Leaflet Viewport (Toggled on Demand) -->
+            <div id="map" class="inactive-viewport"></div>
+
+            <!-- 3D Camera Perspective Selector Dock -->
+            <div class="camera-dock" id="camera-dock">
+                <span class="dock-label"><i class="fa-solid fa-video"></i> CAMERA</span>
+                <button class="cam-btn active" data-cam="junction" title="4-Way Junction Intersection View"><i class="fa-solid fa-crosshairs"></i> Junction</button>
+                <button class="cam-btn" data-cam="street" title="Street Perspective Down Corridor"><i class="fa-solid fa-road"></i> Street</button>
+                <button class="cam-btn" data-cam="overview" title="Aerial Overview Angle"><i class="fa-solid fa-drone"></i> Overview</button>
+                <button class="cam-btn" data-cam="chase" title="Follow Lead Vehicle"><i class="fa-solid fa-car-side"></i> Chase</button>
+                <button class="cam-btn" data-cam="orbit" title="Cinematic 360° Orbit"><i class="fa-solid fa-rotate"></i> Orbit</button>
+            </div>
+
+
+
+            <!-- 3D Interactive Vehicle Inspector Tooltip Card (Hidden by Default) -->
+            <div class="vehicle-inspector-card" id="vehicle-inspector" style="display: none;">
+                <div class="inspector-header">
+                    <span class="inspector-badge" id="insp-type-badge"><i class="fa-solid fa-car"></i> CAR #1024</span>
+                    <button class="inspector-close" id="insp-close-btn">&times;</button>
+                </div>
+                <div class="inspector-grid">
+                    <div class="insp-item">
+                        <span class="insp-lbl">Speed</span>
+                        <span class="insp-val text-success" id="insp-speed">42 km/h</span>
+                    </div>
+                    <div class="insp-item">
+                        <span class="insp-lbl">Wait Time</span>
+                        <span class="insp-val text-warning" id="insp-wait">0.0s</span>
+                    </div>
+                    <div class="insp-item">
+                        <span class="insp-lbl">Route</span>
+                        <span class="insp-val text-link" id="insp-corridor">Outer Ring Rd</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Floating Quick Actions Control Dock (Vercel 100px Pill Buttons) -->
+            <div class="control-dock">
+                <button class="dock-btn btn-surge" id="btn-surge" title="Inject +35 Vehicles instantly into the network">
+                    <i class="fa-solid fa-bolt"></i> <span>Traffic Jam (+35)</span>
+                </button>
+                <button class="dock-btn btn-amb" id="btn-amb" title="Dispatch Priority Ambulance with Instant Green Corridor">
+                    <i class="fa-solid fa-truck-medical"></i> <span>Send Ambulance</span>
+                </button>
+                <button class="dock-btn btn-reset" id="btn-reset" title="Reset Traffic Network & Metrics">
+                    <i class="fa-solid fa-rotate-right"></i> <span>Reset</span>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <!-- 3D Digital Twin Engine & Frontend Dashboard Scripts -->
+    <script src="/static/js/three_scene.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
