@@ -6,24 +6,25 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import app
 
-# WSGI Middleware: Normalizes PATH_INFO if Vercel serverless passes /api/index
+# WSGI Middleware: Normalizes PATH_INFO for Vercel Serverless environment
 class VercelPathFixMiddleware:
     def __init__(self, wsgi_app):
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ, start_response):
-        matched_path = environ.get('HTTP_X_MATCHED_PATH') or environ.get('HTTP_X_FORWARDED_URI')
-        if matched_path and not matched_path.startswith('/api/index'):
-            if '?' in matched_path:
-                matched_path = matched_path.split('?')[0]
-            environ['PATH_INFO'] = matched_path
-        else:
-            path = environ.get('PATH_INFO', '')
+        # Prefer original client request URI sent by Vercel edge reverse proxy
+        uri = (
+            environ.get('HTTP_X_FORWARDED_URI')
+            or environ.get('REQUEST_URI')
+            or environ.get('PATH_INFO', '')
+        )
+        if uri:
+            path = uri.split('?')[0]
             if path.startswith('/api/index'):
-                new_path = path[len('/api/index'):]
-                if not new_path or not new_path.startswith('/'):
-                    new_path = '/' + new_path
-                environ['PATH_INFO'] = new_path
+                path = path[len('/api/index'):]
+            if not path or not path.startswith('/'):
+                path = '/' + path
+            environ['PATH_INFO'] = path
         return self.wsgi_app(environ, start_response)
 
 app.wsgi_app = VercelPathFixMiddleware(app.wsgi_app)

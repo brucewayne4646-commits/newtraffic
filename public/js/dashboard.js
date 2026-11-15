@@ -194,20 +194,23 @@ document.addEventListener('DOMContentLoaded', () => {
             phaseTimerEl.innerText = `${Math.max(1, Math.ceil(clientPhaseTimer))}s`;
         }
 
-        // 3. 2D Map Vehicle Kinematic Forward Gliding (Continuous 60 FPS movement)
+        // 3. 2D Map Vehicle Kinematic Forward Gliding (Driven 100% by Simulation Engine Physics)
         active2DVehicles.forEach(v => {
-            const speedMs = Math.max(4.0, (v.speedKmh || 30.0) / 3.6);
-            const dDist = speedMs * dt * speedMult;
-            const headRad = (v.heading || 0) * (Math.PI / 180.0);
-            v.lat += (dDist * Math.cos(headRad)) / 110540.0;
-            v.lng += (dDist * Math.sin(headRad)) / (111320.0 * Math.max(0.2, Math.cos(v.lat * Math.PI / 180.0)));
+            const isStopped = (v.speedKmh < 0.8);
+            if (!isStopped) {
+                const speedMs = (v.speedKmh || 30.0) / 3.6;
+                const dDist = speedMs * dt * speedMult;
+                const headRad = (v.heading || 0) * (Math.PI / 180.0);
+                v.lat += (dDist * Math.cos(headRad)) / 110540.0;
+                v.lng += (dDist * Math.sin(headRad)) / (111320.0 * Math.max(0.2, Math.cos(v.lat * Math.PI / 180.0)));
+            }
 
             if (v.targetLat !== undefined) {
                 const dLat = v.targetLat - v.lat;
                 const dLng = v.targetLng - v.lng;
                 if (Math.abs(dLat) < 0.002 && Math.abs(dLng) < 0.002) {
-                    v.lat += dLat * 0.12;
-                    v.lng += dLng * 0.12;
+                    v.lat += dLat * (isStopped ? 0.35 : 0.15);
+                    v.lng += dLng * (isStopped ? 0.35 : 0.15);
                 } else {
                     v.lat = v.targetLat;
                     v.lng = v.targetLng;

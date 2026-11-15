@@ -586,16 +586,24 @@ class Traffic3DDigitalTwin {
 
         this.clearHotspotAssets();
 
-        // 1. Procedurally generate pristine, seamless arterial road network & junction apron
-        this.buildUnifiedRoadNetwork(hotspot.nodes || [], hotspot.corridors || []);
+        // 1. Procedurally generate road network following authentic OpenStreetMap corridor waypoints
+        this.buildRoadNetworkFromMap(hotspot.corridors || [], hotspot.nodes || []);
 
-        // 2. Build distant skyline
+        // 2. Procedurally generate junction plazas, IRC yellow conflict boxes & crosswalks
+        this.buildJunctionPlazasAndCrosswalks(hotspot.nodes || [], hotspot.corridors || []);
+
+        // 3. Continuous Elevated Expressway Viaduct for Silk Board
+        if (hotspot.id === 'bengaluru_silkboard') {
+            this.buildSilkBoardFlyover(hotspot.nodes || []);
+        }
+
+        // 4. Build distant skyline
         this.buildNightSkyline();
 
-        // 3. Focus camera on primary junction
+        // 5. Focus camera on primary junction
         this.setCameraPreset('junction');
 
-        console.log(`🗺️ [Traffic3D] Loaded Unified Infrastructure for ${hotspot.name} (${hotspot.city})`);
+        console.log(`🗺️ [Traffic3D] Loaded Authentic Map-Driven Infrastructure for ${hotspot.name} (${hotspot.city})`);
     }
 
     clearHotspotAssets() {
@@ -623,279 +631,255 @@ class Traffic3DDigitalTwin {
     }
 
     // =========================================================================
-    // 5. UNIFIED ARTERIAL JUNCTION & HIGH-PRECISION ROAD NETWORK
+    // 5. MAP-DRIVEN ROAD NETWORK (PARSING REAL OSM WAYPOINTS)
     // =========================================================================
-    buildUnifiedRoadNetwork(nodes = [], corridors = []) {
+    buildRoadNetworkFromMap(corridors, nodes = []) {
         const mc = this.matCache;
+        const laneWidth = 3.6;     // Standard IRC lane width in meters
+        const medianOffset = 1.2;  // Clearance from road centerline to inner lane edge
+
+        corridors.forEach(corridor => {
+            const waypoints = corridor.waypoints;
+            if (!waypoints || waypoints.length < 2) return;
+
+            const lanes = corridor.lanes || 3;
+            // Carriageway asphalt width: lanes * 3.6m + 1.2m shoulder margin
+            const carriageWidth = (lanes * laneWidth) + 1.2;
+            const carriageCenterOffset = medianOffset + (carriageWidth / 2);
+
+            // Convert all OSM lat/lng waypoints to 3D Cartesian coordinates
+            const points3D = waypoints.map(pt => this.latLngTo3D(pt[0], pt[1], 0.05));
+
+            for (let i = 0; i < points3D.length - 1; i++) {
+                const p1 = points3D[i];
+                const p2 = points3D[i + 1];
+
+                const dir = new THREE.Vector3().subVectors(p2, p1);
+                const segLen = dir.length();
+                if (segLen < 0.5) continue;
+
+                const angle = Math.atan2(dir.x, dir.z);
+                const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+                // Perpendicular unit vector to the left (Left-Hand Traffic Carriageway)
+                const leftNorm = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+
+                // 1. Directional Carriageway Asphalt Deck
+                const carriageCenter = mid.clone().add(leftNorm.clone().multiplyScalar(carriageCenterOffset));
+                const roadGeo = new THREE.PlaneGeometry(carriageWidth, segLen);
+                const roadMesh = new THREE.Mesh(roadGeo, mc.asphalt);
+                roadMesh.rotation.x = -Math.PI / 2;
+                roadMesh.rotation.z = -angle;
+                roadMesh.position.set(carriageCenter.x, 0.05, carriageCenter.z);
+                roadMesh.receiveShadow = true;
+                this.scene.add(roadMesh);
+                this.roadMeshes.push(roadMesh);
+
+                // 2. Yellow Median Boundary Line
+                const yellowGeo = new THREE.PlaneGeometry(0.30, segLen);
+                const yellowMesh = new THREE.Mesh(yellowGeo, mc.yellowMarking);
+                yellowMesh.rotation.x = -Math.PI / 2;
+                yellowMesh.rotation.z = -angle;
+                const yellowPos = mid.clone().add(leftNorm.clone().multiplyScalar(medianOffset - 0.15));
+                yellowMesh.position.set(yellowPos.x, 0.07, yellowPos.z);
+                this.scene.add(yellowMesh);
+                this.roadMeshes.push(yellowMesh);
+
+                // 3. Dashed White Lane Dividers
+                for (let l = 1; l < lanes; l++) {
+                    const lOffset = medianOffset + (l * laneWidth);
+                    const dashCount = Math.max(1, Math.floor(segLen / 7.2));
+                    
+                    for (let d = 0; d < dashCount; d++) {
+                        const t = (d + 0.5) / dashCount;
+                        const dashCenter = new THREE.Vector3().lerpVectors(p1, p2, t)
+                            .add(leftNorm.clone().multiplyScalar(lOffset));
+                        
+                        const dashGeo = new THREE.PlaneGeometry(0.22, 3.6);
+                        const dashMesh = new THREE.Mesh(dashGeo, mc.whiteMarking);
+                        dashMesh.rotation.x = -Math.PI / 2;
+                        dashMesh.rotation.z = -angle;
+                        dashMesh.position.set(dashCenter.x, 0.07, dashCenter.z);
+                        this.scene.add(dashMesh);
+                        this.roadMeshes.push(dashMesh);
+                    }
+                }
+
+                // 4. Solid White Shoulder Line (Outer Carriageway Border)
+                const shoulderOffset = medianOffset + (lanes * laneWidth);
+                const shoulderGeo = new THREE.PlaneGeometry(0.24, segLen);
+                const shoulderMesh = new THREE.Mesh(shoulderGeo, mc.whiteMarking);
+                shoulderMesh.rotation.x = -Math.PI / 2;
+                shoulderMesh.rotation.z = -angle;
+                const shoulderPos = mid.clone().add(leftNorm.clone().multiplyScalar(shoulderOffset));
+                shoulderMesh.position.set(shoulderPos.x, 0.07, shoulderPos.z);
+                this.scene.add(shoulderMesh);
+                this.roadMeshes.push(shoulderMesh);
+
+                // 5. Concrete Curb & Elevated Sidewalk along Outer Roadway Edge
+                const totalRoadEdge = medianOffset + carriageWidth;
+                const sidewalkWidth = 4.0;
+
+                const curbGeo = new THREE.BoxGeometry(0.44, 0.30, segLen);
+                const curbMesh = new THREE.Mesh(curbGeo, mc.curb);
+                curbMesh.rotation.y = angle;
+                const curbPos = mid.clone().add(leftNorm.clone().multiplyScalar(totalRoadEdge + 0.22));
+                curbMesh.position.set(curbPos.x, 0.15, curbPos.z);
+                this.scene.add(curbMesh);
+                this.roadMeshes.push(curbMesh);
+
+                const walkGeo = new THREE.BoxGeometry(sidewalkWidth, 0.22, segLen);
+                const walkMesh = new THREE.Mesh(walkGeo, mc.sidewalk);
+                walkMesh.rotation.y = angle;
+                const walkPos = mid.clone().add(leftNorm.clone().multiplyScalar(totalRoadEdge + 0.44 + sidewalkWidth / 2));
+                walkMesh.position.set(walkPos.x, 0.11, walkPos.z);
+                walkMesh.receiveShadow = true;
+                this.scene.add(walkMesh);
+                this.roadMeshes.push(walkMesh);
+
+                // 6. Street Lamps along outer sidewalk (Placed safely on sidewalk, facing road)
+                if (segLen > 28) {
+                    const lampCount = Math.floor(segLen / 38);
+                    for (let lc = 0; lc < lampCount; lc++) {
+                        const t = (lc + 0.5) / lampCount;
+                        const lampBase = new THREE.Vector3().lerpVectors(p1, p2, t);
+                        const polePos = lampBase.clone().add(leftNorm.clone().multiplyScalar(totalRoadEdge + 1.8));
+
+                        const nearJunction = nodes.some(n => {
+                            const nPos = this.latLngTo3D(n.lat, n.lng);
+                            return polePos.distanceTo(nPos) < 32.0;
+                        });
+                        if (nearJunction) continue;
+
+                        this.createStreetLamp(polePos, lampBase, leftNorm);
+                    }
+                }
+            }
+        });
+    }
+
+    // =========================================================================
+    // 6. PROCEDURAL JUNCTION PLAZAS, IRC YELLOW BOX & CROSSWALKS
+    // =========================================================================
+    buildJunctionPlazasAndCrosswalks(nodes, corridors) {
+        const mc = this.matCache;
+
+        nodes.forEach(node => {
+            const center3D = this.latLngTo3D(node.lat, node.lng, 0.05);
+            const lanes = node.lanes || 4;
+            const plazaRadius = Math.max(20, lanes * 5.2);
+
+            // 1. Central Junction Core Apron (Matte dark asphalt matching road deck)
+            const plazaGeo = new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.05, 36);
+            const plazaMesh = new THREE.Mesh(plazaGeo, mc.asphalt);
+            plazaMesh.position.set(center3D.x, 0.05, center3D.z);
+            plazaMesh.receiveShadow = true;
+            this.scene.add(plazaMesh);
+            this.roadMeshes.push(plazaMesh);
+
+            // 2. IRC Standard Yellow Box Junction Marking
+            if (node.type === "signalized") {
+                const boxSize = plazaRadius * 1.35;
+                const yellowBoxGroup = new THREE.Group();
+                yellowBoxGroup.position.set(center3D.x, 0.065, center3D.z);
+
+                const borderMat = mc.yellowMarking;
+                const bTop = new THREE.Mesh(new THREE.PlaneGeometry(boxSize, 0.40), borderMat);
+                bTop.rotation.x = -Math.PI / 2;
+                bTop.position.set(0, 0, -boxSize / 2);
+                yellowBoxGroup.add(bTop);
+
+                const bBot = new THREE.Mesh(new THREE.PlaneGeometry(boxSize, 0.40), borderMat);
+                bBot.rotation.x = -Math.PI / 2;
+                bBot.position.set(0, 0, boxSize / 2);
+                yellowBoxGroup.add(bBot);
+
+                const bLeft = new THREE.Mesh(new THREE.PlaneGeometry(0.40, boxSize), borderMat);
+                bLeft.rotation.x = -Math.PI / 2;
+                bLeft.position.set(-boxSize / 2, 0, 0);
+                yellowBoxGroup.add(bLeft);
+
+                const bRight = new THREE.Mesh(new THREE.PlaneGeometry(0.40, boxSize), borderMat);
+                bRight.rotation.x = -Math.PI / 2;
+                bRight.position.set(boxSize / 2, 0, 0);
+                yellowBoxGroup.add(bRight);
+
+                const stripeSpacing = 2.4;
+                for (let s = -boxSize * 0.7; s <= boxSize * 0.7; s += stripeSpacing) {
+                    const stripeLen = Math.min(boxSize * 1.35, Math.max(3.0, (boxSize * 0.9 - Math.abs(s)) * 1.9));
+                    const diagStripe = new THREE.Mesh(new THREE.PlaneGeometry(0.25, stripeLen), borderMat);
+                    diagStripe.rotation.x = -Math.PI / 2;
+                    diagStripe.rotation.z = Math.PI / 4;
+                    diagStripe.position.set(s, 0, 0);
+                    yellowBoxGroup.add(diagStripe);
+                }
+                this.scene.add(yellowBoxGroup);
+                this.roadMeshes.push(yellowBoxGroup);
+            }
+
+            // 3. Full-Width Zebra Crossings & Overhead Signal Gantries
+            const processedBearings = [];
+            const connectedCorridors = corridors.filter(c => c.to === node.id || c.from === node.id);
+
+            connectedCorridors.forEach(c => {
+                const waypoints = c.waypoints;
+                if (!waypoints || waypoints.length < 2) return;
+
+                const isIncoming = (c.to === node.id);
+                const w1 = isIncoming ? waypoints[waypoints.length - 2] : waypoints[0];
+                const w2 = isIncoming ? waypoints[waypoints.length - 1] : waypoints[1];
+
+                const p1 = this.latLngTo3D(w1[0], w1[1]);
+                const p2 = this.latLngTo3D(w2[0], w2[1]);
+
+                const outDir = isIncoming
+                    ? new THREE.Vector3().subVectors(p1, p2).normalize()
+                    : new THREE.Vector3().subVectors(p2, p1).normalize();
+
+                if (outDir.lengthSq() < 0.1) return;
+
+                const rawBearing = Math.atan2(outDir.x, outDir.z);
+
+                const alreadyHandled = processedBearings.some(b => {
+                    let diff = Math.abs(b - rawBearing);
+                    while (diff > Math.PI) diff = Math.abs(diff - Math.PI * 2);
+                    return diff < 0.40;
+                });
+                if (alreadyHandled) return;
+                processedBearings.push(rawBearing);
+
+                const cLanes = c.lanes || 4;
+                const fullRoadWidth = (cLanes * 3.6 + 1.2) * 2 + 1.6;
+
+                const crossDist = plazaRadius + 4.5;
+                const crossCenter = center3D.clone().add(outDir.clone().multiplyScalar(crossDist));
+                const crossingAngle = Math.atan2(outDir.x, outDir.z);
+
+                this.createFullWidthZebraCrossing(
+                    crossCenter.x,
+                    crossCenter.z,
+                    fullRoadWidth,
+                    5.5,
+                    crossingAngle
+                );
+
+                if (node.type === "signalized") {
+                    this.createSignalGantry(crossCenter.x, crossCenter.z, crossingAngle, `${node.id}_${c.id}`, fullRoadWidth, c.name || 'JUNCTION CORRIDOR');
+                }
+            });
+        });
+    }
+
+    // =========================================================================
+    // 6b. SILK BOARD CONTINUOUS ELEVATED VIADUCT FLYOVER
+    // =========================================================================
+    buildSilkBoardFlyover(nodes = []) {
         let focalCenter = new THREE.Vector3(0, 0, 0);
         if (nodes && nodes.length > 0) {
             focalCenter = this.latLngTo3D(nodes[0].lat, nodes[0].lng, 0);
         }
 
-        const roadWidth = 24.0;         // Standard dual-carriageway (12m inbound + 12m outbound)
-        const halfRoad = roadWidth / 2; // 12m
-        const apronSize = 36.0;         // Central junction core apron (36m x 36m)
-        const armLength = 320.0;
-        const armStartDist = apronSize / 2; // 18.0m from center
-        const sidewalkWidth = 4.0;
-
-        // 1. SEAMLESS CENTRAL JUNCTION ASPHALT APRON (Matte dark asphalt, ZERO raised cylinder)
-        const apronGeo = new THREE.PlaneGeometry(apronSize, apronSize);
-        const apronMesh = new THREE.Mesh(apronGeo, mc.asphalt);
-        apronMesh.rotation.x = -Math.PI / 2;
-        apronMesh.position.set(focalCenter.x, 0.05, focalCenter.z);
-        apronMesh.receiveShadow = true;
-        this.scene.add(apronMesh);
-        this.roadMeshes.push(apronMesh);
-
-        // 2. INDIAN YELLOW CONFLICT BOX (IRC Yellow Box Junction cross-hatching)
-        const boxSize = 18.0;
-        const yellowBoxGroup = new THREE.Group();
-        yellowBoxGroup.position.set(focalCenter.x, 0.065, focalCenter.z);
-
-        const borderMat = mc.yellowMarking;
-        const bTop = new THREE.Mesh(new THREE.PlaneGeometry(boxSize, 0.40), borderMat);
-        bTop.rotation.x = -Math.PI / 2;
-        bTop.position.set(0, 0, -boxSize / 2);
-        yellowBoxGroup.add(bTop);
-
-        const bBot = new THREE.Mesh(new THREE.PlaneGeometry(boxSize, 0.40), borderMat);
-        bBot.rotation.x = -Math.PI / 2;
-        bBot.position.set(0, 0, boxSize / 2);
-        yellowBoxGroup.add(bBot);
-
-        const bLeft = new THREE.Mesh(new THREE.PlaneGeometry(0.40, boxSize), borderMat);
-        bLeft.rotation.x = -Math.PI / 2;
-        bLeft.position.set(-boxSize / 2, 0, 0);
-        yellowBoxGroup.add(bLeft);
-
-        const bRight = new THREE.Mesh(new THREE.PlaneGeometry(0.40, boxSize), borderMat);
-        bRight.rotation.x = -Math.PI / 2;
-        bRight.position.set(boxSize / 2, 0, 0);
-        yellowBoxGroup.add(bRight);
-
-        // 45-degree diagonal cross-hatch stripes inside box
-        const stripeSpacing = 2.4;
-        for (let s = -boxSize * 0.7; s <= boxSize * 0.7; s += stripeSpacing) {
-            const stripeLen = Math.min(boxSize * 1.35, Math.max(3.0, (boxSize * 0.9 - Math.abs(s)) * 1.9));
-            const diagStripe = new THREE.Mesh(new THREE.PlaneGeometry(0.25, stripeLen), borderMat);
-            diagStripe.rotation.x = -Math.PI / 2;
-            diagStripe.rotation.z = Math.PI / 4;
-            diagStripe.position.set(s, 0, 0);
-            yellowBoxGroup.add(diagStripe);
-        }
-        this.scene.add(yellowBoxGroup);
-        this.roadMeshes.push(yellowBoxGroup);
-
-        // 3. THE 4 ARTERIAL ROAD ARMS (WEST, EAST, NORTH, SOUTH)
-        const arms = [
-            {
-                name: 'West (BTM Layout)',
-                angle: -Math.PI / 2,
-                heading: new THREE.Vector3(-1, 0, 0),
-                normal: new THREE.Vector3(0, 0, 1),
-                signName: 'BTM LAYOUT ◀ OUTER RING ROAD ▶'
-            },
-            {
-                name: 'East (HSR Layout)',
-                angle: Math.PI / 2,
-                heading: new THREE.Vector3(1, 0, 0),
-                normal: new THREE.Vector3(0, 0, -1),
-                signName: 'HSR LAYOUT ◀ OUTER RING ROAD ▶'
-            },
-            {
-                name: 'North (Madiwala / Koramangala)',
-                angle: Math.PI,
-                heading: new THREE.Vector3(0, 0, -1),
-                normal: new THREE.Vector3(-1, 0, 0),
-                signName: 'MADIWALA ◀ HOSUR ROAD ARTERIAL ▶'
-            },
-            {
-                name: 'South (Electronic City)',
-                angle: 0,
-                heading: new THREE.Vector3(0, 0, 1),
-                normal: new THREE.Vector3(1, 0, 0),
-                signName: 'ELECTRONIC CITY ◀ HOSUR RD FLYOVER ▶'
-            }
-        ];
-
-        arms.forEach(arm => {
-            const h = arm.heading;
-            const norm = arm.normal;
-            const rotY = arm.angle;
-
-            // A. Continuous Road Asphalt Deck
-            const roadDeckLen = armLength;
-            const roadDeckMid = focalCenter.clone().add(h.clone().multiplyScalar(armStartDist + roadDeckLen / 2));
-            const roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, roadDeckLen), mc.asphalt);
-            roadMesh.rotation.x = -Math.PI / 2;
-            roadMesh.rotation.z = -rotY;
-            roadMesh.position.set(roadDeckMid.x, 0.05, roadDeckMid.z);
-            roadMesh.receiveShadow = true;
-            this.scene.add(roadMesh);
-            this.roadMeshes.push(roadMesh);
-
-            // B. Center Concrete Median Divider (Starts at 22m, clear of crosswalk)
-            const medianStart = 22.0;
-            const medianLen = armStartDist + armLength - medianStart;
-            const medianMid = focalCenter.clone().add(h.clone().multiplyScalar(medianStart + medianLen / 2));
-
-            // Median curb barrier
-            const medianCurb = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.32, medianLen), mc.curb);
-            medianCurb.rotation.y = rotY;
-            medianCurb.position.set(medianMid.x, 0.16, medianMid.z);
-            medianCurb.receiveShadow = true;
-            this.scene.add(medianCurb);
-            this.roadMeshes.push(medianCurb);
-
-            // Rounded Bullnose Cap at the mouth of the median
-            const bullnosePos = focalCenter.clone().add(h.clone().multiplyScalar(medianStart));
-            const bullnose = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.32, 16), mc.curb);
-            bullnose.position.set(bullnosePos.x, 0.16, bullnosePos.z);
-            this.scene.add(bullnose);
-            this.roadMeshes.push(bullnose);
-
-            // Landscaped Green Shrubbery Hedge on top of median
-            const hedge = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.55, Math.max(1, medianLen - 1.2)), mc.medianHedge);
-            hedge.rotation.y = rotY;
-            hedge.position.set(medianMid.x, 0.32 + 0.275, medianMid.z);
-            hedge.receiveShadow = true;
-            this.scene.add(hedge);
-            this.roadMeshes.push(hedge);
-
-            // Yellow safety lines along median curb
-            [-1.15, 1.15].forEach(sideOffset => {
-                const yPos = medianMid.clone().add(norm.clone().multiplyScalar(sideOffset));
-                const yLine = new THREE.Mesh(new THREE.PlaneGeometry(0.24, medianLen), mc.yellowMarking);
-                yLine.rotation.x = -Math.PI / 2;
-                yLine.rotation.z = -rotY;
-                yLine.position.set(yPos.x, 0.07, yPos.z);
-                this.scene.add(yLine);
-                this.roadMeshes.push(yLine);
-            });
-
-            // C. Dashed White Lane Markings (3 lanes in each direction)
-            [-8.0, -4.4, 4.4, 8.0].forEach(laneOffset => {
-                const dashSpacing = 7.5;
-                const dashCount = Math.floor(medianLen / dashSpacing);
-                for (let d = 0; d < dashCount; d++) {
-                    const distAlong = medianStart + (d + 0.5) * dashSpacing;
-                    const dashPos = focalCenter.clone()
-                        .add(h.clone().multiplyScalar(distAlong))
-                        .add(norm.clone().multiplyScalar(laneOffset));
-                    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 3.6), mc.whiteMarking);
-                    dash.rotation.x = -Math.PI / 2;
-                    dash.rotation.z = -rotY;
-                    dash.position.set(dashPos.x, 0.07, dashPos.z);
-                    this.scene.add(dash);
-                    this.roadMeshes.push(dash);
-                }
-            });
-
-            // D. Solid White Outer Shoulder Lines (at ±11.6m)
-            [-11.6, 11.6].forEach(shOffset => {
-                const shPos = medianMid.clone().add(norm.clone().multiplyScalar(shOffset));
-                const shLine = new THREE.Mesh(new THREE.PlaneGeometry(0.25, medianLen), mc.whiteMarking);
-                shLine.rotation.x = -Math.PI / 2;
-                shLine.rotation.z = -rotY;
-                shLine.position.set(shPos.x, 0.07, shPos.z);
-                this.scene.add(shLine);
-                this.roadMeshes.push(shLine);
-            });
-
-            // E. Clean, Bold Zebra Crossing across Full Road (dist = 18.5m, width = 24.0m)
-            const crossDist = 18.5;
-            const crossCenter = focalCenter.clone().add(h.clone().multiplyScalar(crossDist));
-            this.createFullWidthZebraCrossing(crossCenter.x, crossCenter.z, roadWidth, 4.2, rotY);
-
-            // F. Transversal Solid Stop Line at dist = 21.0m (2.5m behind zebra crossing)
-            const stopLinePos = focalCenter.clone().add(h.clone().multiplyScalar(21.0));
-            const stopLine = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, 0.60), mc.whiteMarking);
-            stopLine.rotation.x = -Math.PI / 2;
-            stopLine.rotation.z = -rotY;
-            stopLine.position.set(stopLinePos.x, 0.072, stopLinePos.z);
-            this.scene.add(stopLine);
-            this.roadMeshes.push(stopLine);
-
-            // G. Overhead Cantilever Traffic Signal Gantry at dist = 20.5m
-            this.createSignalGantry(crossCenter.x, crossCenter.z, rotY, `node_${arm.name}`, roadWidth, arm.signName);
-
-            // H. Two-Tone Safety Curbs & Interlocking Paver Sidewalks along Left & Right Edges
-            const curbLen = armLength;
-            const curbMid = focalCenter.clone().add(h.clone().multiplyScalar(armStartDist + curbLen / 2));
-
-            [-1, 1].forEach(side => {
-                const curbOffset = side * (halfRoad + 0.22);
-                const walkOffset = side * (halfRoad + 0.44 + sidewalkWidth / 2);
-
-                // Striped curb (Yellow/Black hazard blocks)
-                const cPos = curbMid.clone().add(norm.clone().multiplyScalar(curbOffset));
-                const cMesh = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.32, curbLen), mc.curbStriped);
-                cMesh.rotation.y = rotY;
-                cMesh.position.set(cPos.x, 0.16, cPos.z);
-                this.scene.add(cMesh);
-                this.roadMeshes.push(cMesh);
-
-                // Paver sidewalk
-                const wPos = curbMid.clone().add(norm.clone().multiplyScalar(walkOffset));
-                const wMesh = new THREE.Mesh(new THREE.BoxGeometry(sidewalkWidth, 0.22, curbLen), mc.sidewalk);
-                wMesh.rotation.y = rotY;
-                wMesh.position.set(wPos.x, 0.11, wPos.z);
-                wMesh.receiveShadow = true;
-                this.scene.add(wMesh);
-                this.roadMeshes.push(wMesh);
-
-                // Streetlamps along outer sidewalk edge (every 36m)
-                for (let d = 34; d < curbLen - 20; d += 36) {
-                    const lampBase = focalCenter.clone().add(h.clone().multiplyScalar(armStartDist + d));
-                    const lampPos = lampBase.clone().add(norm.clone().multiplyScalar(side * (halfRoad + sidewalkWidth - 0.5)));
-                    const lampNorm = norm.clone().multiplyScalar(side);
-                    this.createStreetLamp(lampPos, lampBase, lampNorm);
-                }
-
-                // Roadside Landscaping Trees along outer sidewalk verge (every 28m)
-                for (let t = 28; t < curbLen - 15; t += 28) {
-                    const treeBase = focalCenter.clone().add(h.clone().multiplyScalar(armStartDist + t));
-                    const treePos = treeBase.clone().add(norm.clone().multiplyScalar(side * (halfRoad + sidewalkWidth + 1.2)));
-                    this.createRoadsideTree(treePos.x, treePos.z, 0.90 + (t % 3) * 0.12);
-                }
-            });
-        });
-
-        // 4. CORNER SIDEWALK PLAZAS (Connecting all 4 corners NW, NE, SW, SE seamlessly)
-        const cornerSize = 16.0;
-        const cornerHalf = cornerSize / 2;
-        const cornerOffsets = [
-            { x: -(halfRoad + cornerHalf), z: -(halfRoad + cornerHalf), name: 'NW' },
-            { x: (halfRoad + cornerHalf), z: -(halfRoad + cornerHalf), name: 'NE' },
-            { x: -(halfRoad + cornerHalf), z: (halfRoad + cornerHalf), name: 'SW' },
-            { x: (halfRoad + cornerHalf), z: (halfRoad + cornerHalf), name: 'SE' }
-        ];
-
-        cornerOffsets.forEach(co => {
-            const cornerPos = focalCenter.clone().add(new THREE.Vector3(co.x, 0, co.z));
-            const cornerMesh = new THREE.Mesh(new THREE.BoxGeometry(cornerSize, 0.22, cornerSize), mc.sidewalk);
-            cornerMesh.position.set(cornerPos.x, 0.11, cornerPos.z);
-            cornerMesh.receiveShadow = true;
-            this.scene.add(cornerMesh);
-            this.roadMeshes.push(cornerMesh);
-
-            // Corner decorative landscaping tree
-            this.createRoadsideTree(cornerPos.x, cornerPos.z, 1.15);
-
-            // Stainless steel pedestrian safety bollards along corner edge
-            [-1, 1].forEach(bx => {
-                [-1, 1].forEach(bz => {
-                    const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.95, 10), mc.bollard);
-                    bollard.position.set(cornerPos.x + bx * (cornerHalf - 1.2), 0.47, cornerPos.z + bz * (cornerHalf - 1.2));
-                    this.scene.add(bollard);
-                    this.roadMeshes.push(bollard);
-                });
-            });
-        });
-
-        // 5. SILK BOARD CONTINUOUS ELEVATED EXPRESSWAY FLYOVER (Authentic landmark along Hosur corridor)
-        const flyoverPiersZ = [-280, -220, -160, -100, -42, 42, 100, 160, 220, 280];
+        const flyoverPiersZ = [-320, -260, -200, -140, -80, 80, 140, 200, 260, 320];
         const pierMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7, metalness: 0.3 });
         const flyDeckMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8, metalness: 0.2 });
         const parapetMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6, metalness: 0.3 });
@@ -916,8 +900,8 @@ class Traffic3DDigitalTwin {
             this.flyoverMeshes.push(beam);
         });
 
-        // Continuous uninterrupted 640m elevated expressway deck at y = 12.8m spanning across the corridor
-        const totalFlyoverLen = 640.0;
+        // Continuous uninterrupted 680m elevated expressway deck at y = 12.8m spanning across the corridor
+        const totalFlyoverLen = 680.0;
         const deck = new THREE.Mesh(new THREE.BoxGeometry(14.4, 0.85, totalFlyoverLen), flyDeckMat);
         deck.position.set(focalCenter.x, 12.8, focalCenter.z);
         deck.castShadow = true;
@@ -939,13 +923,13 @@ class Traffic3DDigitalTwin {
             this.flyoverMeshes.push(parapet);
         });
 
-        // Flyover Lane Markings (White dashed lines in both directions)
+        // Flyover Lane Markings
         [-3.6, 3.6].forEach(flyLaneOffset => {
             const flyDashSpacing = 8.0;
             const flyDashCount = Math.floor(totalFlyoverLen / flyDashSpacing);
             for (let d = 0; d < flyDashCount; d++) {
                 const zPos = -totalFlyoverLen / 2 + (d + 0.5) * flyDashSpacing;
-                const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 4.0), mc.whiteMarking);
+                const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 4.0), this.matCache.whiteMarking);
                 dash.rotation.x = -Math.PI / 2;
                 dash.position.set(focalCenter.x + flyLaneOffset, 13.25, focalCenter.z + zPos);
                 this.scene.add(dash);
@@ -1541,124 +1525,8 @@ class Traffic3DDigitalTwin {
     }
 
     // ==========================================
-    // 12. TELEMETRY SYNCHRONIZATION
+    // 12. TELEMETRY SYNCHRONIZATION (AUTHENTIC GPS & FORWARD HEADING)
     // ==========================================
-    calculateVehicle3DTransform(veh) {
-        const cid = (veh.corridor_id || '').toUpperCase();
-        let arm = 'west';
-        let inbound = true;
-
-        if (cid.includes('BTM_TO') || (cid.includes('_TO_SILK') && cid.includes('BTM'))) {
-            arm = 'west'; inbound = true;
-        } else if (cid.includes('SILK_TO_BTM') || cid.includes('TO_BTM')) {
-            arm = 'west'; inbound = false;
-        } else if (cid.includes('HSR_TO') || (cid.includes('_TO_SILK') && cid.includes('HSR'))) {
-            arm = 'east'; inbound = true;
-        } else if (cid.includes('SILK_TO_HSR') || cid.includes('TO_HSR')) {
-            arm = 'east'; inbound = false;
-        } else if (cid.includes('MADIWALA_TO') || (cid.includes('_TO_SILK') && cid.includes('MADIWALA'))) {
-            arm = 'north'; inbound = true;
-        } else if (cid.includes('SILK_TO_MADIWALA') || cid.includes('TO_MADIWALA')) {
-            arm = 'north'; inbound = false;
-        } else if (cid.includes('ECITY_TO') || cid.includes('HOSUR_TO') || (cid.includes('_TO_SILK') && (cid.includes('ECITY') || cid.includes('HOSUR')))) {
-            arm = 'south'; inbound = true;
-        } else if (cid.includes('SILK_TO_ECITY') || cid.includes('SILK_TO_HOSUR') || cid.includes('TO_ECITY')) {
-            arm = 'south'; inbound = false;
-        } else {
-            const cosLat = Math.cos(this.centerLat * Math.PI / 180.0);
-            const dx = (veh.lng - this.centerLng) * 111320.0 * cosLat;
-            const dz = -(veh.lat - this.centerLat) * 110540.0;
-            if (Math.abs(dx) > Math.abs(dz)) {
-                arm = dx < 0 ? 'west' : 'east';
-                inbound = (arm === 'west') ? (dx < -25) : (dx > 25);
-            } else {
-                arm = dz < 0 ? 'north' : 'south';
-                inbound = (arm === 'north') ? (dz < -25) : (dz > 25);
-            }
-        }
-
-        let progress = 0.5;
-        if (veh.distance_m !== undefined && veh.corridor_len && veh.corridor_len > 0) {
-            progress = Math.max(0.0, Math.min(1.0, veh.distance_m / veh.corridor_len));
-        } else {
-            const cosLat = Math.cos(this.centerLat * Math.PI / 180.0);
-            const dx = (veh.lng - this.centerLng) * 111320.0 * cosLat;
-            const dz = -(veh.lat - this.centerLat) * 110540.0;
-            const dist = Math.hypot(dx, dz);
-            progress = Math.max(0.0, Math.min(1.0, 1.0 - (dist / 320.0)));
-        }
-
-        const laneIdx = (veh.lane !== undefined) ? (Math.abs(veh.lane) % 3) : ((Math.abs(veh.id ? veh.id.charCodeAt(veh.id.length - 1) : 0)) % 3);
-        const lateralDist = 4.4 + laneIdx * 2.8;
-
-        const maxDist = 320.0;
-        const stopDist = 22.0;
-
-        let x = 0, z = 0, rotY = 0;
-
-        if (arm === 'west') {
-            if (inbound) {
-                rotY = Math.PI / 2;
-                z = lateralDist;
-                x = -maxDist + progress * (maxDist - stopDist);
-                if (progress > 0.96 && veh.speed_kmh > 1.0) {
-                    x = -stopDist + (progress - 0.96) * 25.0 * 25.0;
-                }
-            } else {
-                rotY = -Math.PI / 2;
-                z = -lateralDist;
-                x = -stopDist - progress * (maxDist - stopDist);
-            }
-        } else if (arm === 'east') {
-            if (inbound) {
-                rotY = -Math.PI / 2;
-                z = -lateralDist;
-                x = maxDist - progress * (maxDist - stopDist);
-                if (progress > 0.96 && veh.speed_kmh > 1.0) {
-                    x = stopDist - (progress - 0.96) * 25.0 * 25.0;
-                }
-            } else {
-                rotY = Math.PI / 2;
-                z = lateralDist;
-                x = stopDist + progress * (maxDist - stopDist);
-            }
-        } else if (arm === 'north') {
-            if (inbound) {
-                rotY = 0;
-                x = lateralDist;
-                z = -maxDist + progress * (maxDist - stopDist);
-                if (progress > 0.96 && veh.speed_kmh > 1.0) {
-                    z = -stopDist + (progress - 0.96) * 25.0 * 25.0;
-                }
-            } else {
-                rotY = Math.PI;
-                x = -lateralDist;
-                z = -stopDist - progress * (maxDist - stopDist);
-            }
-        } else if (arm === 'south') {
-            if (inbound) {
-                rotY = Math.PI;
-                x = -lateralDist;
-                z = maxDist - progress * (maxDist - stopDist);
-                if (progress > 0.96 && veh.speed_kmh > 1.0) {
-                    z = stopDist - (progress - 0.96) * 25.0 * 25.0;
-                }
-            } else {
-                rotY = 0;
-                x = lateralDist;
-                z = stopDist + progress * (maxDist - stopDist);
-            }
-        }
-
-        return {
-            pos: new THREE.Vector3(x, 0, z),
-            rotY: rotY,
-            arm: arm,
-            inbound: inbound,
-            lateralDist: lateralDist
-        };
-    }
-
     updateTelemetry(state) {
         if (!state) return;
 
@@ -1672,15 +1540,23 @@ class Traffic3DDigitalTwin {
             this.setSignalState(signals[0]);
         }
 
-        // 2. Synchronize Vehicles locked strictly inside the 4 road corridors (Zero Void Floating)
+        // 2. Synchronize Vehicles locked strictly to OpenStreetMap corridors & forward heading
         const incomingVehicles = state.vehicles || [];
         const seenIds = new Set();
 
         incomingVehicles.forEach(veh => {
             seenIds.add(veh.id);
-            const transform = this.calculateVehicle3DTransform(veh);
-            const targetPos = transform.pos;
-            const targetRotY = transform.rotY;
+            const targetPos = this.latLngTo3D(veh.lat, veh.lng, 0);
+
+            // Forward orientation:
+            // Since model front is +Z:
+            // Heading is compass degrees from North clockwise (0=North=-Z, 90=East=+X, 180=South=+Z, 270=West=-X)
+            // Vx = sin(heading), Vz = -cos(heading)
+            // targetRotY = atan2(Vx, Vz)
+            const headingRad = (veh.heading || 0) * (Math.PI / 180.0);
+            const vx = Math.sin(headingRad);
+            const vz = -Math.cos(headingRad);
+            const targetRotY = Math.atan2(vx, vz);
 
             let vEntry = this.vehicleMeshes.get(veh.id);
             if (!vEntry) {
@@ -1695,10 +1571,7 @@ class Traffic3DDigitalTwin {
                     targetRotY: targetRotY,
                     speed: veh.speed_kmh || 0,
                     type: veh.type,
-                    data: veh,
-                    arm: transform.arm,
-                    inbound: transform.inbound,
-                    lateralDist: transform.lateralDist
+                    data: veh
                 };
                 this.vehicleMeshes.set(veh.id, vEntry);
             } else {
@@ -1706,9 +1579,6 @@ class Traffic3DDigitalTwin {
                 vEntry.targetRotY = targetRotY;
                 vEntry.speed = veh.speed_kmh || 0;
                 vEntry.data = veh;
-                vEntry.arm = transform.arm;
-                vEntry.inbound = transform.inbound;
-                vEntry.lateralDist = transform.lateralDist;
             }
         });
 
@@ -1733,18 +1603,41 @@ class Traffic3DDigitalTwin {
     // ==========================================
     setSignalState(state) {
         if (!state) return;
-        const isRed = !!state.in_all_red;
+        const currentPhase = (state.current_phase !== undefined) ? state.current_phase : 0;
+        const isAllRed = !!state.in_all_red;
         const isYellow = !!state.in_yellow;
-        const isGreen = !isRed && !isYellow;
 
-        this.signalGantries.forEach((gantry) => {
+        this.signalGantries.forEach((gantry, key) => {
+            const isEastWestArm = key.includes('West') || key.includes('East') || key.includes('BTM') || key.includes('HSR');
+            let armState = 'red';
+
+            if (isAllRed) {
+                armState = 'red';
+            } else if (currentPhase === 0) {
+                // East-West Phase Active
+                if (isEastWestArm) {
+                    armState = isYellow ? 'yellow' : 'green';
+                } else {
+                    armState = 'red';
+                }
+            } else {
+                // North-South Phase Active
+                if (!isEastWestArm) {
+                    armState = isYellow ? 'yellow' : 'green';
+                } else {
+                    armState = 'red';
+                }
+            }
+
             const lights = gantry.lights;
-            if (isRed) {
+            if (!lights) return;
+
+            if (armState === 'red') {
                 lights.red.material.emissiveIntensity = 4.0;
                 lights.yellow.material.emissiveIntensity = 0.1;
                 lights.green.material.emissiveIntensity = 0.1;
                 if (gantry.pointLight) gantry.pointLight.color.setHex(0xff0022);
-            } else if (isYellow) {
+            } else if (armState === 'yellow') {
                 lights.red.material.emissiveIntensity = 0.1;
                 lights.yellow.material.emissiveIntensity = 4.0;
                 lights.green.material.emissiveIntensity = 0.1;
@@ -1909,32 +1802,15 @@ class Traffic3DDigitalTwin {
         const delta = Math.min(this.clock.getDelta(), 0.05);
         const time = this.clock.getElapsedTime();
 
-        // 1. Vehicle Position & Heading Interpolation with Smooth Kinematic Gliding
-        const lerpFactor = Math.min(1.0, delta * 8.0);
-        const simSpeed = this.speedMultiplier || 1.0;
+        // 1. Vehicle Position & Heading Interpolation Driven 100% by Simulation Engine Physics
+        const lerpFactor = Math.min(1.0, delta * 12.0);
         for (const [id, vEntry] of this.vehicleMeshes.entries()) {
-            const speedKmh = (vEntry.speed !== undefined && vEntry.speed > 0) ? vEntry.speed : 32.0;
-            const speedMs = Math.max(6.0, speedKmh / 3.6);
-
-            // Continuously glide forward along vehicle forward heading scaled by simSpeed
-            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), vEntry.group.rotation.y);
-            vEntry.targetPos.addScaledVector(forward, speedMs * delta * simSpeed);
             vEntry.group.position.lerp(vEntry.targetPos, lerpFactor);
 
             let diff = vEntry.targetRotY - vEntry.group.rotation.y;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             vEntry.group.rotation.y += diff * lerpFactor;
-
-            // Continuous seamless circulation: loop back along the same road arm mouth
-            if (Math.abs(vEntry.group.position.x) > 340) {
-                vEntry.targetPos.x = vEntry.group.position.x > 0 ? -325 : 325;
-                vEntry.group.position.x = vEntry.targetPos.x;
-            }
-            if (Math.abs(vEntry.group.position.z) > 340) {
-                vEntry.targetPos.z = vEntry.group.position.z > 0 ? -325 : 325;
-                vEntry.group.position.z = vEntry.targetPos.z;
-            }
 
             // Ambulance Strobes
             if (vEntry.group.userData && vEntry.group.userData.strobes) {
