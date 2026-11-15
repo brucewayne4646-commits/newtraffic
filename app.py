@@ -149,18 +149,19 @@ def control_simulation():
     data = request.json or {}
     action = data.get("action")
     
-    if action == "pause":
-        sim_running = False
-    elif action == "play":
-        sim_running = True
-    elif action == "reset":
-        with sim_lock:
+    with sim_lock:
+        if action == "pause":
+            sim_running = False
+        elif action == "play":
+            sim_running = True
+        elif action == "reset":
             engine.change_location(engine.current_hotspot_id)
-    elif action == "speed":
-        speed_val = float(data.get("value", 1.0))
-        time_dilation = max(0.5, min(5.0, speed_val))
+        elif action == "speed":
+            speed_val = float(data.get("value", 1.0))
+            time_dilation = max(0.5, min(5.0, speed_val))
+        state = engine.get_full_state()
 
-    return jsonify({"status": "success", "running": sim_running, "speed": time_dilation})
+    return jsonify({"status": "success", "running": sim_running, "speed": time_dilation, "state": state})
 
 
 @app.route('/api/control/mode', methods=['POST'])
@@ -170,7 +171,8 @@ def set_control_mode():
     mode = data.get("mode", "AI_RL")
     with sim_lock:
         engine.set_signal_mode(mode)
-    return jsonify({"status": "success", "active_mode": mode})
+        state = engine.get_full_state()
+    return jsonify({"status": "success", "active_mode": mode, "state": state})
 
 
 @app.route('/api/incident/surge', methods=['POST'])
@@ -178,7 +180,8 @@ def trigger_surge():
     """Spawns rush hour surge."""
     with sim_lock:
         msg = engine.trigger_rush_hour()
-    return jsonify({"status": "success", "message": msg})
+        state = engine.get_full_state()
+    return jsonify({"status": "success", "message": msg, "state": state})
 
 
 @app.route('/api/incident/accident', methods=['POST'])
@@ -188,7 +191,8 @@ def trigger_accident():
     edge = data.get("edge")
     with sim_lock:
         msg = engine.inject_incident(edge)
-    return jsonify({"status": "success", "message": msg})
+        state = engine.get_full_state()
+    return jsonify({"status": "success", "message": msg, "state": state})
 
 
 @app.route('/api/incident/clear', methods=['POST'])
@@ -196,7 +200,8 @@ def clear_accidents():
     """Clears all road blockages."""
     with sim_lock:
         msg = engine.clear_incidents()
-    return jsonify({"status": "success", "message": msg})
+        state = engine.get_full_state()
+    return jsonify({"status": "success", "message": msg, "state": state})
 
 
 @app.route('/api/emergency/ambulance', methods=['POST'])
@@ -204,7 +209,8 @@ def dispatch_ambulance():
     """Dispatches emergency vehicle with Green Corridor priority."""
     with sim_lock:
         msg = engine.dispatch_ambulance()
-    return jsonify({"status": "success", "message": msg})
+        state = engine.get_full_state()
+    return jsonify({"status": "success", "message": msg, "state": state})
 
 
 @app.route('/api/benchmark-report', methods=['GET'])
