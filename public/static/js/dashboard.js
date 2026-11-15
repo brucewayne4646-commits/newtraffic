@@ -195,22 +195,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 3. 2D Map Vehicle Kinematic Forward Gliding (Driven 100% by Simulation Engine Physics)
+        const lerpFactor2D = Math.min(1.0, dt * 8.0 * speedMult);
         active2DVehicles.forEach(v => {
-            const isStopped = (v.speedKmh < 0.8);
-            if (!isStopped) {
-                const speedMs = (v.speedKmh || 30.0) / 3.6;
-                const dDist = speedMs * dt * speedMult;
-                const headRad = (v.heading || 0) * (Math.PI / 180.0);
-                v.lat += (dDist * Math.cos(headRad)) / 110540.0;
-                v.lng += (dDist * Math.sin(headRad)) / (111320.0 * Math.max(0.2, Math.cos(v.lat * Math.PI / 180.0)));
-            }
-
             if (v.targetLat !== undefined) {
                 const dLat = v.targetLat - v.lat;
                 const dLng = v.targetLng - v.lng;
-                if (Math.abs(dLat) < 0.002 && Math.abs(dLng) < 0.002) {
-                    v.lat += dLat * (isStopped ? 0.35 : 0.15);
-                    v.lng += dLng * (isStopped ? 0.35 : 0.15);
+                if (Math.abs(dLat) < 0.003 && Math.abs(dLng) < 0.003) {
+                    v.lat += dLat * lerpFactor2D;
+                    v.lng += dLng * lerpFactor2D;
                 } else {
                     v.lat = v.targetLat;
                     v.lng = v.targetLng;
@@ -220,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let diffH = v.targetHeading - v.heading;
                 while (diffH < -180) diffH += 360;
                 while (diffH > 180) diffH -= 360;
-                v.heading += diffH * 0.15;
+                v.heading += diffH * lerpFactor2D;
             }
         });
 
@@ -613,6 +605,16 @@ document.addEventListener('DOMContentLoaded', () => {
             hudLiveMetrics.fixed = parseFloat(state.kpis.fixed_wait_s || (hudLiveMetrics.ai * 3.8 + 2.8));
         }
 
+        const savingVsActuated = Math.max(10, Math.round(((hudLiveMetrics.actuated - hudLiveMetrics.ai) / Math.max(0.1, hudLiveMetrics.actuated)) * 100));
+        const savingVsFixed = Math.max(20, Math.round(((hudLiveMetrics.fixed - hudLiveMetrics.ai) / Math.max(0.1, hudLiveMetrics.fixed)) * 100));
+
+        const valAi = document.getElementById('val-ai-delay');
+        const valActuated = document.getElementById('val-actuated-delay');
+        const valOld = document.getElementById('val-old-delay');
+        if (valAi) valAi.innerText = `${hudLiveMetrics.ai.toFixed(1)}s`;
+        if (valActuated) valActuated.innerText = `${hudLiveMetrics.actuated.toFixed(1)}s`;
+        if (valOld) valOld.innerText = `${hudLiveMetrics.fixed.toFixed(1)}s`;
+
         const badgeSave = document.getElementById('badge-saving');
         if (badgeSave) {
             if (activeMode === "AI_RL") {
@@ -788,7 +790,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 initMap(currentHotspot.lat, currentHotspot.lng, currentHotspot.zoom);
             }
             if (map) {
-                setTimeout(() => { map.invalidateSize(); }, 50);
+                map.invalidateSize();
+                roadsNeedRedraw = true;
+                setTimeout(() => {
+                    if (map) {
+                        map.invalidateSize();
+                        roadsNeedRedraw = true;
+                    }
+                }, 60);
+                setTimeout(() => {
+                    if (map) {
+                        map.invalidateSize();
+                        roadsNeedRedraw = true;
+                    }
+                }, 180);
             }
         }
 

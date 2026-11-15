@@ -126,10 +126,13 @@ class Traffic3DDigitalTwin {
         // 8. Selection Ring
         this.createSelectionRing();
 
-        // 9. Immediate baseline road network generation (Populated on first paint, zero blank screen)
-        this.buildUnifiedRoadNetwork([], []);
-        this.buildNightSkyline();
-        this.setCameraPreset('junction');
+        // 9. Immediate baseline road network generation (Zero blank screen)
+        if (typeof window !== 'undefined' && window.INITIAL_SIM_STATE && window.INITIAL_SIM_STATE.hotspot) {
+            this.loadHotspot(window.INITIAL_SIM_STATE.hotspot);
+        } else {
+            this.buildNightSkyline();
+            this.setCameraPreset('junction');
+        }
 
         // 10. Event Listeners
         window.addEventListener('resize', () => this.onResize());
@@ -769,9 +772,11 @@ class Traffic3DDigitalTwin {
             const lanes = node.lanes || 4;
             const plazaRadius = Math.max(20, lanes * 5.2);
 
-            // 1. Central Junction Core Apron (Matte dark asphalt matching road deck)
-            const plazaGeo = new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.05, 36);
+            // 1. Central Junction Core Apron (Matte dark asphalt plane seamlessly connecting road approaches)
+            const boxSize = plazaRadius * 1.45;
+            const plazaGeo = new THREE.PlaneGeometry(boxSize, boxSize);
             const plazaMesh = new THREE.Mesh(plazaGeo, mc.asphalt);
+            plazaMesh.rotation.x = -Math.PI / 2;
             plazaMesh.position.set(center3D.x, 0.05, center3D.z);
             plazaMesh.receiveShadow = true;
             this.scene.add(plazaMesh);
