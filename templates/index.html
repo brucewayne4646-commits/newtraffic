@@ -251,6 +251,9 @@
     </div>
 
     <!-- 3D Digital Twin Engine & Frontend Dashboard Scripts -->
+    <script>
+        window.INITIAL_SIM_STATE = {{ initial_state | tojson if initial_state else 'null' }};
+    </script>
     <script src="/static/js/three_scene.js"></script>
     <script src="/static/js/dashboard.js"></script>
 </body>

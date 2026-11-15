@@ -637,7 +637,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (brandIcon) brandIcon.className = 'fa-solid fa-map brand-icon';
             if (fpsBadge) fpsBadge.innerHTML = '<i class="fa-solid fa-circle text-cyan" style="font-size: 6px; margin-right: 4px;"></i>2D MAP LIVE';
             if (logTitle) logTitle.innerText = '2D GEOSPATIAL MAP';
-            if (map) map.invalidateSize();
+            
+            // If map hasn't been initialized yet, initialize it now!
+            if (!map && currentHotspot) {
+                initMap(currentHotspot.lat, currentHotspot.lng, currentHotspot.zoom);
+            }
+            if (map) {
+                setTimeout(() => { map.invalidateSize(); }, 50);
+            }
         }
 
         if (btnView3d) btnView3d.addEventListener('click', () => activate3DMode());
@@ -752,14 +759,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 8. Initial Bootstrapping & Serverless Active Polling Fallback ---
     async function bootstrap() {
         setupEventListeners();
-        try {
-            const res = await fetch('/api/state');
-            const state = await res.json();
+
+        // 1. Instant Zero-Latency Hydration from Server Pre-Rendered State
+        if (window.INITIAL_SIM_STATE && window.INITIAL_SIM_STATE.hotspot) {
+            const state = window.INITIAL_SIM_STATE;
             roadsNeedRedraw = true;
             initMap(state.hotspot.lat, state.hotspot.lng, state.hotspot.zoom);
             handleTelemetry(state);
-        } catch (e) {
-            console.error("Initialization error:", e);
+        } else {
+            try {
+                const res = await fetch('/api/state');
+                if (res.ok) {
+                    const state = await res.json();
+                    roadsNeedRedraw = true;
+                    initMap(state.hotspot.lat, state.hotspot.lng, state.hotspot.zoom);
+                    handleTelemetry(state);
+                }
+            } catch (e) {
+                console.error("Initialization error:", e);
+            }
         }
 
         socket.on('telemetry_update', (state) => {
@@ -783,6 +801,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     const res = await fetch('/api/state');
                     if (res.ok) {
                         const state = await res.json();
+                        if (!map && state.hotspot) {
+                            initMap(state.hotspot.lat, state.hotspot.lng, state.hotspot.zoom);
+                        }
                         handleTelemetry(state);
                     }
                 } catch (err) {
@@ -794,7 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.on('connect_error', () => activateServerlessPolling());
         setTimeout(() => {
             if (!socket.connected) activateServerlessPolling();
-        }, 1800);
+        }, 1200);
     }
 
     bootstrap();
