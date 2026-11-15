@@ -122,8 +122,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 3. 60 FPS Render Loop ---
     let tick = 0;
+    let clientPhaseTimer = 28.0;
+    let clientPhaseIndex = 0;
+
     function renderLoop(now) {
         tick += 0.04;
+
+        // Smooth real-time phase countdown timer (always ticks every second)
+        clientPhaseTimer -= 0.016;
+        if (clientPhaseTimer <= 0) {
+            clientPhaseIndex = (clientPhaseIndex === 0) ? 1 : 0;
+            clientPhaseTimer = 32.0;
+            const phaseNameEl = document.getElementById('hud-phase-name');
+            if (phaseNameEl) {
+                phaseNameEl.innerText = clientPhaseIndex === 0 ? 'East-West (BTM ⇄ HSR)' : 'North-South (Hosur ⇄ E-City)';
+            }
+        }
+        const phaseTimerEl = document.getElementById('hud-phase-timer');
+        if (phaseTimerEl) {
+            phaseTimerEl.innerText = `${Math.max(1, Math.ceil(clientPhaseTimer))}s`;
+        }
+
         if (canvasCtx && map && currentHotspot) {
             if (roadsNeedRedraw) renderStaticRoads();
 
@@ -847,10 +866,9 @@ document.addEventListener('DOMContentLoaded', () => {
             pollNext();
         }
 
+        // Start sequential polling immediately
+        activateServerlessPolling();
         socket.on('connect_error', () => activateServerlessPolling());
-        setTimeout(() => {
-            if (!socket.connected) activateServerlessPolling();
-        }, 1200);
     }
 
     bootstrap();

@@ -369,14 +369,15 @@ class Traffic3DDigitalTwin {
             return new THREE.CanvasTexture(aCan);
         };
 
-        // Road Materials (PBR with Bump & Specular sheen)
+        // Road Materials (PBR Matte Asphalt matching city pavement)
         mc.asphalt = new THREE.MeshStandardMaterial({
-            color: 0x111520,
-            roughness: 0.58,
-            metalness: 0.18,
+            color: 0x141822,
+            roughness: 0.88,
+            metalness: 0.06,
             bumpMap: asphaltBump,
-            bumpScale: 0.032
+            bumpScale: 0.02
         });
+        mc.junctionAsphalt = mc.asphalt;
 
         mc.curb = new THREE.MeshStandardMaterial({
             color: 0x2e3646,
@@ -664,13 +665,13 @@ class Traffic3DDigitalTwin {
                     }
                 }
 
-                // 1. Directional Carriageway Asphalt Deck (trimmed to meet junction circle without encroaching into center)
-                const deckTrimStart = startPlazaR > 0 ? (startPlazaR - 0.5) : 0;
-                const deckTrimEnd = endPlazaR > 0 ? (endPlazaR - 0.5) : 0;
+                // 1. Directional Carriageway Asphalt Deck (Seamlessly extends into junction with zero gaps)
+                const deckTrimStart = 0;
+                const deckTrimEnd = 0;
 
-                if (segLen > deckTrimStart + deckTrimEnd) {
-                    const deckP1 = p1.clone().add(uDir.clone().multiplyScalar(deckTrimStart));
-                    const deckP2 = p2.clone().sub(uDir.clone().multiplyScalar(deckTrimEnd));
+                if (segLen > 0.5) {
+                    const deckP1 = p1;
+                    const deckP2 = p2;
                     const deckMid = new THREE.Vector3().addVectors(deckP1, deckP2).multiplyScalar(0.5);
                     const deckLen = deckP1.distanceTo(deckP2);
 
@@ -697,10 +698,9 @@ class Traffic3DDigitalTwin {
                 }
 
                 // 2. Road Dividers (Raised Concrete Median Curb + Green Hedge)
-                // Set back by (plazaRadius + 11.0m) so dividers STOP CLEANLY before crosswalks & stop lines!
-                // NEVER enters the crosswalk or junction plaza!
-                const medianTrimStart = startPlazaR > 0 ? (startPlazaR + 11.0) : 0;
-                const medianTrimEnd = endPlazaR > 0 ? (endPlazaR + 11.0) : 0;
+                // Stops cleanly at the zebra crossing mouth (16m from junction center)
+                const medianTrimStart = startPlazaR > 0 ? (startPlazaR + 2.0) : 0;
+                const medianTrimEnd = endPlazaR > 0 ? (endPlazaR + 2.0) : 0;
 
                 if (segLen > medianTrimStart + medianTrimEnd) {
                     const medP1 = p1.clone().add(uDir.clone().multiplyScalar(medianTrimStart));
@@ -887,15 +887,15 @@ class Traffic3DDigitalTwin {
             const lanes = node.lanes || 4;
             const plazaRadius = Math.max(18, lanes * 5.0);
 
-            // 1. Central Junction Intersection Plaza
-            const plazaGeo = new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.05, 32);
-            const plazaMesh = new THREE.Mesh(plazaGeo, mc.asphalt);
-            plazaMesh.position.set(center3D.x, 0.05, center3D.z);
+            // 1. Central Junction Intersection Apron (Flat matte asphalt seamless apron)
+            const plazaGeo = new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.045, 48);
+            const plazaMesh = new THREE.Mesh(plazaGeo, mc.junctionAsphalt);
+            plazaMesh.position.set(center3D.x, 0.045, center3D.z);
             plazaMesh.receiveShadow = true;
             this.scene.add(plazaMesh);
             this.roadMeshes.push(plazaMesh);
 
-            // 2. Build BOLD ZEBRA CROSSINGS ACROSS THE 100% FULL ROAD WIDTH (CURB-TO-CURB)
+            // 2. Build BOLD ZEBRA CROSSINGS ACROSS FULL APPROACH CARRIAGEWAYS
             // Group corridor approaches by bearing to prevent duplicate / partial crossings
             const processedBearings = [];
             const connectedCorridors = corridors.filter(c => c.to === node.id || c.from === node.id);
@@ -929,13 +929,12 @@ class Traffic3DDigitalTwin {
                 if (alreadyHandled) return;
                 processedBearings.push(rawBearing);
 
-                // CRITICAL FIX: The zebra crossing MUST span the FULL DUAL-CARRIAGEWAY ROAD WIDTH!
-                // Both incoming & outgoing carriageways + median + shoulders
-                const cLanes = c.lanes || 4;
-                const fullRoadWidth = (cLanes * 3.6 + 1.2) * 2 + 1.6; // Spans full 28m - 34m from curb to curb!
+                // Zebra crossing spans dual carriageways precisely
+                const cLanes = c.lanes || 3;
+                const fullRoadWidth = (cLanes * 3.6 + 1.2) * 2 + 1.2;
 
-                // Position zebra crossing at the threshold mouth of the junction plaza
-                const crossDist = plazaRadius + 4.5;
+                // Position zebra crossing right at the junction threshold mouth
+                const crossDist = plazaRadius + 1.0;
                 const crossCenter = center3D.clone().add(outDir.clone().multiplyScalar(crossDist));
                 const crossingAngle = Math.atan2(outDir.x, outDir.z);
 
@@ -943,7 +942,7 @@ class Traffic3DDigitalTwin {
                     crossCenter.x,
                     crossCenter.z,
                     fullRoadWidth,
-                    6.0,
+                    4.6,
                     crossingAngle
                 );
 
@@ -1691,21 +1690,24 @@ class Traffic3DDigitalTwin {
         // 1. Vehicle Position & Heading Interpolation with Smooth Kinematic Gliding
         const lerpFactor = Math.min(1.0, delta * 8.0);
         for (const [id, vEntry] of this.vehicleMeshes.entries()) {
-            const speedKmh = vEntry.speed !== undefined ? vEntry.speed : 30;
-            const speedMs = speedKmh / 3.6;
+            const speedKmh = (vEntry.speed !== undefined && vEntry.speed > 0) ? vEntry.speed : 30.0;
+            const speedMs = Math.max(5.5, speedKmh / 3.6);
 
-            // Advance forward continuously if vehicle has velocity (not stopped at red signal)
-            if (speedMs > 0.5) {
-                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), vEntry.group.rotation.y);
-                vEntry.targetPos.addScaledVector(forward, speedMs * delta * 0.95);
-            }
-
+            // Continuously glide forward along vehicle forward heading
+            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), vEntry.group.rotation.y);
+            vEntry.targetPos.addScaledVector(forward, speedMs * delta);
             vEntry.group.position.lerp(vEntry.targetPos, lerpFactor);
 
             let diff = vEntry.targetRotY - vEntry.group.rotation.y;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
             vEntry.group.rotation.y += diff * lerpFactor;
+
+            // Continuous seamless circulation: loop back when leaving visible horizon
+            if (vEntry.group.position.length() > 340) {
+                vEntry.targetPos.multiplyScalar(-0.85);
+                vEntry.group.position.copy(vEntry.targetPos);
+            }
 
             // Ambulance Strobes
             if (vEntry.group.userData && vEntry.group.userData.strobes) {
